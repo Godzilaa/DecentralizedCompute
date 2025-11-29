@@ -30,18 +30,15 @@ pip install -r requirements.txt
 
 1. Generate Prisma client:
    ```bash
-   prisma generate --schema=prisma/schema.prisma
+   python -c "from prisma import Prisma; Prisma().generate()"
    ```
 
 2. Push the schema to your database:
    ```bash
-   prisma db push --schema=prisma/schema.prisma
+   python -c "from prisma import Prisma; import asyncio; asyncio.run(Prisma().connect()); asyncio.run(Prisma().db.push())"
    ```
 
-   Or if you prefer migrations:
-   ```bash
-   prisma migrate dev --name init --schema=prisma/schema.prisma
-   ```
+   Note: The Python Prisma client will automatically create tables when you first connect.
 
 ### 4. Run the Application
 
