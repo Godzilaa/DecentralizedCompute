@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Wallet, 
   TrendingUp, 
@@ -105,72 +105,10 @@ export default function EarningsPage() {
     setIsClient(true);
   }, []);
 
-  // Mock data for development - replace with actual API calls
-  const mockEarnings: EarningsStats = {
-    totalEarned: 1247.83,
-    todayEarned: 45.20,
-    weeklyEarned: 284.15,
-    monthlyEarned: 967.45,
-    totalJobs: 156,
-    activeNodes: 3,
-    averageJobDuration: 45,
-    estimatedMonthly: 1200.0
-  };
-
-  const mockPayments: Payment[] = [
-    {
-      id: '1',
-      jobId: 'job-abc123',
-      nodeId: 'node-us-east-01',
-      amount: 12.45,
-      currency: 'PHOTON',
-      timestamp: Date.now() - 3600000,
-      status: 'completed',
-      txHash: '0x1234...abcd',
-      jobType: 'Training',
-      duration: 45
-    },
-    {
-      id: '2',
-      jobId: 'job-def456',
-      nodeId: 'node-eu-west-02',
-      amount: 8.20,
-      currency: 'PHOTON',
-      timestamp: Date.now() - 7200000,
-      status: 'completed',
-      txHash: '0x5678...efgh',
-      jobType: 'Inference',
-      duration: 23
-    },
-    {
-      id: '3',
-      jobId: 'job-ghi789',
-      nodeId: 'node-us-east-01',
-      amount: 24.60,
-      currency: 'PHOTON',
-      timestamp: Date.now() - 10800000,
-      status: 'pending',
-      jobType: 'Fine-tuning',
-      duration: 78
-    }
-  ];
 
   const { nodes } = useNodes();
 
-  useEffect(() => {
-    if (isClient && aptosPublicKey) {
-      fetchEarningsByPublicKey(aptosPublicKey);
-    }
-  }, [isClient, aptosPublicKey, nodes]);
-  
-  // Auto-fetch when wallet connects
-  useEffect(() => {
-    if (isClient && connected && normalizedAddress && !useManualKey) {
-      fetchEarningsByPublicKey(normalizedAddress);
-    }
-  }, [isClient, connected, normalizedAddress, useManualKey]);
-
-  const fetchEarningsByPublicKey = async (publicKey: string) => {
+  const fetchEarningsByPublicKey = useCallback(async (publicKey: string) => {
     setLoading(true);
     setError(null);
     try {
@@ -179,26 +117,42 @@ export default function EarningsPage() {
         api.getEarningsByPublicKey(publicKey),
         api.getPaymentsByPublicKey(publicKey)
       ]);
-      
+
       setEarnings(earningsResult);
-      setPayments(paymentsResult.payments);
-      
+      // Ensure payments conform to the expected Payment['status'] union
+      const normalizedPayments = (paymentsResult.payments || []).map((p: any) => ({
+        ...p,
+        status: (p.status === 'pending' || p.status === 'completed' || p.status === 'failed') ? p.status : 'pending'
+      } as Payment));
+      setPayments(normalizedPayments);
+
       // Filter nodes belonging to this public key
       const filteredNodes = nodes.filter(node => 
         node.specs && (node.specs as any).aptosPublicKey === publicKey
       );
       setUserNodes(filteredNodes);
-      
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch earnings');
-      // Fallback to mock data for development
-      setEarnings(mockEarnings);
-      setPayments(mockPayments);
+    
       setUserNodes(nodes.slice(0, 3));
     } finally {
       setLoading(false);
     }
-  };
+  }, [nodes]);
+
+  useEffect(() => {
+    if (isClient && aptosPublicKey) {
+      fetchEarningsByPublicKey(aptosPublicKey);
+    }
+  }, [isClient, aptosPublicKey, nodes, fetchEarningsByPublicKey]);
+
+  // Auto-fetch when wallet connects
+  useEffect(() => {
+    if (isClient && connected && normalizedAddress && !useManualKey) {
+      fetchEarningsByPublicKey(normalizedAddress);
+    }
+  }, [isClient, connected, normalizedAddress, useManualKey, fetchEarningsByPublicKey]);
 
   const handleConnect = () => {
     if (aptosPublicKey.trim()) {

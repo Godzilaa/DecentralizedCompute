@@ -36,6 +36,11 @@ export class AptosEscrowService {
     providerAddress: string,
     amountApt: number
   ): Promise<string> {
+    // Validate inputs
+    if (!providerAddress || typeof providerAddress !== 'string') {
+      throw new Error('Invalid provider address: must be a non-empty string');
+    }
+    
     // Normalize provider address
     let normalizedAddress = providerAddress.trim().toLowerCase();
     if (!normalizedAddress.startsWith('0x')) {
@@ -68,7 +73,7 @@ export class AptosEscrowService {
 
     const tx: InputTransactionData = {
       data: {
-        function: ESCROW_FUNCTIONS.DEPOSIT_TO_ESCROW,
+        function: ESCROW_FUNCTIONS.DEPOSIT_TO_ESCROW as `${string}::${string}::${string}`,
         functionArguments: [jobIdBytes, normalizedAddress, amountOctas],
       },
     };
@@ -78,6 +83,38 @@ export class AptosEscrowService {
       return res.hash;
     } catch (err) {
       console.error('Transaction submission error:', err);
+
+      // Normalize common Move abort / simulation errors so the UI can react
+      let msg = '';
+      if (err !== null && err !== undefined) {
+        if (typeof err === 'string') {
+          msg = err;
+        } else if (typeof err === 'object') {
+          const maybeErr = err as { message?: unknown; toString?: () => string };
+          if (typeof maybeErr.message === 'string') {
+            msg = maybeErr.message;
+          } else if (typeof maybeErr.toString === 'function') {
+            try {
+              msg = maybeErr.toString();
+            } catch {
+              msg = String(err);
+            }
+          } else {
+            msg = String(err);
+          }
+        } else {
+          msg = String(err);
+        }
+      }
+      // Detect the specific abort signature we observed in the UI: "Move abort 0x1" or contract-specific code
+      if (typeof msg === 'string' && (msg.includes('Move abort 0x1') || msg.includes('E_ESCROW_EXISTS') || /E_ESCROW_EXISTS/i.test(msg))) {
+        // Throw a clearer, typed error for the UI to detect
+        const e: any = new Error('Escrow already exists for this job (E_ESCROW_EXISTS)');
+        e.code = 'E_ESCROW_EXISTS';
+        throw e;
+      }
+
+      // Fall back to rethrowing original
       throw err;
     }
   }
@@ -88,7 +125,7 @@ export class AptosEscrowService {
   ): Promise<string> {
     const tx: InputTransactionData = {
       data: {
-        function: ESCROW_FUNCTIONS.RELEASE_ESCROW,
+        function: ESCROW_FUNCTIONS.RELEASE_ESCROW as `${string}::${string}::${string}`,
         functionArguments: [stringToBytes(jobId)],
       },
     };
@@ -102,7 +139,7 @@ export class AptosEscrowService {
   ): Promise<string> {
     const tx: InputTransactionData = {
       data: {
-        function: ESCROW_FUNCTIONS.REFUND_ESCROW,
+        function: ESCROW_FUNCTIONS.REFUND_ESCROW as `${string}::${string}::${string}`,
         functionArguments: [stringToBytes(jobId)],
       },
     };

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Activity, Clock, Play, Server, MonitorPlay, Plus, Upload } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Activity, Clock, Play, Server, MonitorPlay, Plus, Upload, Coins } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -12,13 +13,8 @@ import ScriptEditor from '@/components/script-editor';
 /**
  * PAGE: Dashboard
  */
-export default function DashboardPage({ 
-    setView, 
-    setSelectedJobId 
-}: { 
-    setView: (v: string) => void;
-    setSelectedJobId: (id: string) => void;
-}) {
+export default function DashboardPage() {
+    const router = useRouter();
     const { jobs, loading: jobsLoading, error: jobsError, refetch: refetchJobs } = useJobs();
     const { nodes, loading: nodesLoading } = useNodes();
     const { stats, loading: statsLoading } = useSystemStats();
@@ -30,7 +26,7 @@ export default function DashboardPage({
             const result = await api.createJob(jobData);
             console.log('Job created:', result);
             refetchJobs();
-            setShowCreateJob(false);
+            setShowJobWizard(false);
         } catch (error) {
             console.error('Failed to create job:', error);
         }
@@ -186,8 +182,8 @@ export default function DashboardPage({
                                                     variant="ghost" 
                                                     size="sm" 
                                                     onClick={() => {
-                                                        setSelectedJobId(job.jobId);
-                                                        setView('monitor');
+                                                        // Navigate to monitor and pass jobId via query string
+                                                        router.push(`/monitor?selectedJobId=${encodeURIComponent(job.jobId)}`);
                                                     }}
                                                 >
                                                     <MonitorPlay className="w-4 h-4" />
@@ -272,8 +268,9 @@ export default function DashboardPage({
                     onClose={() => setShowJobWizard(false)}
                     onJobCreated={(jobId) => {
                         refetchJobs();
-                        setSelectedJobId(jobId);
-                        setView('monitor');
+                        // Close wizard and navigate to monitor for the created job
+                        setShowJobWizard(false);
+                        router.push(`/monitor?selectedJobId=${encodeURIComponent(jobId)}`);
                     }}
                 />
             )}

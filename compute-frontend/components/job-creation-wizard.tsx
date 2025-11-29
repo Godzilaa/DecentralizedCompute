@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Plus, 
   Code, 
@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { useNodes, api, type JobCreateRequest } from '@/lib/api';
-import NodesPage from '@/app/(views)/nodes/page';
+import NodesSelector from './nodes-selector';
 import ScriptEditor from './script-editor';
 import EscrowManager from './escrow-manager';
 import { useWallet } from '@aptos-labs/wallet-adapter-react';
@@ -62,24 +62,13 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
     console.log('Job Creation Wizard - Nodes Loading:', nodesLoading);
     console.log('Job Creation Wizard - Nodes Error:', nodesError);
     console.log('Job Creation Wizard - Selected Node:', selectedNode);
-  }, [nodes, nodesLoading, nodesError, selectedNode]);
+    console.log('Job Creation Wizard - Account:', account);
+    console.log('Job Creation Wizard - Account Address:', account?.address);
+    console.log('Job Creation Wizard - Account Address Type:', typeof account?.address);
+    // canProceed may be expensive; include for debug visibility
+  }, [nodes, nodesLoading, nodesError, selectedNode, account]);
 
-  // Track selectedNode changes specifically
-  useEffect(() => {
-    console.log('JobCreationWizard - selectedNode state changed to:', selectedNode);
-    console.log('JobCreationWizard - has selected node:', !!selectedNode);
-    console.log('JobCreationWizard - canProceed() returns:', canProceed());
-  }, [selectedNode]);
-
-  const steps = [
-    { id: 'details', name: 'Job Details', icon: Settings },
-    { id: 'nodes', name: 'Select Nodes', icon: Server },
-    { id: 'script', name: 'Training Script', icon: Code },
-    { id: 'payment', name: 'Payment & Escrow', icon: Coins },
-    { id: 'review', name: 'Review & Create', icon: CheckCircle }
-  ];
-
-  const canProceed = () => {
+  const canProceed = useCallback(() => {
     switch (currentStep) {
       case 'details':
         const detailsValid = jobDetails.datasetName.trim().length > 0;
@@ -100,7 +89,22 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
         console.log('canProceed - default: false, currentStep:', currentStep);
         return false;
     }
-  };
+  }, [currentStep, jobDetails, selectedNode, script]);
+
+  // Track selectedNode changes specifically
+  useEffect(() => {
+    console.log('JobCreationWizard - selectedNode state changed to:', selectedNode);
+    console.log('JobCreationWizard - has selected node:', !!selectedNode);
+    console.log('JobCreationWizard - canProceed() returns:', canProceed());
+  }, [selectedNode, canProceed]);
+
+  const steps = [
+    { id: 'details', name: 'Job Details', icon: Settings },
+    { id: 'nodes', name: 'Select Nodes', icon: Server },
+    { id: 'script', name: 'Training Script', icon: Code },
+    { id: 'payment', name: 'Payment & Escrow', icon: Coins },
+    { id: 'review', name: 'Review & Create', icon: CheckCircle }
+  ];
 
   const handleNext = () => {
     const stepOrder: WizardStep[] = ['details', 'nodes', 'script', 'payment', 'review'];
@@ -240,23 +244,22 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
                 {nodesError && ` (Error: ${nodesError})`}
               </div>
             </div>
-            <div className="max-h-96 overflow-y-auto">
-              <NodesPage 
-                onSelectNodes={(nodeIds) => {
-                  console.log('JobCreationWizard - Callback received:', nodeIds);
-                  console.log('JobCreationWizard - Current selectedNode before update:', selectedNode);
-                  // For single selection, take the first node or null if empty
-                  const newSelectedNode = nodeIds.length > 0 ? nodeIds[0] : null;
-                  setSelectedNode(newSelectedNode);
-                  console.log('JobCreationWizard - setSelectedNode called with:', newSelectedNode);
-                  setTimeout(() => {
-                    console.log('JobCreationWizard - selectedNode should now be:', newSelectedNode);
-                  }, 100);
-                }}
-                jobCreationMode={true}
-                singleSelection={true}
-              />
-            </div>
+              <div className="max-h-96 overflow-y-auto">
+                <NodesSelector
+                  onSelectNodes={(nodeIds) => {
+                    console.log('JobCreationWizard - Callback received:', nodeIds);
+                    console.log('JobCreationWizard - Current selectedNode before update:', selectedNode);
+                    const newSelectedNode = nodeIds.length > 0 ? nodeIds[0] : null;
+                    setSelectedNode(newSelectedNode);
+                    console.log('JobCreationWizard - setSelectedNode called with:', newSelectedNode);
+                    setTimeout(() => {
+                      console.log('JobCreationWizard - selectedNode should now be:', newSelectedNode);
+                    }, 100);
+                  }}
+                  jobCreationMode={true}
+                  singleSelection={true}
+                />
+              </div>
           </div>
         );
         
@@ -365,7 +368,7 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-zinc-400">Runtime Estimate:</span>
-                  <span className="text-zinc-200">{jobDetails.runtimeMinutesEstimate} minutes</span>
+                  <span className="text-zinc-200">{jobDetails.runtimeMinutesEstimate ?? 0} minutes</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-400">Rate per minute:</span>
@@ -374,7 +377,7 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
                 <div className="border-t border-zinc-700 pt-2 mt-2">
                   <div className="flex justify-between font-medium">
                     <span className="text-zinc-300">Estimated Cost:</span>
-                    <span className="text-zinc-200">{(jobDetails.runtimeMinutesEstimate * 0.05).toFixed(2)} APT</span>
+                    <span className="text-zinc-200">{(((jobDetails.runtimeMinutesEstimate ?? 0) * 0.05)).toFixed(2)} APT</span>
                   </div>
                 </div>
               </div>
@@ -383,8 +386,12 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
             {/* Escrow Manager */}
             <EscrowManager
               jobId={jobDetails.datasetName || 'temp-job-id'}
-              providerAddress={account?.address || '0x0000000000000000000000000000000000000000000000000000000000000001'} // Use your own address as provider for testing
-              estimatedCost={jobDetails.runtimeMinutesEstimate * 0.05}
+              providerAddress={
+                account?.address && typeof account.address === 'string' 
+                  ? account.address 
+                  : '0x0000000000000000000000000000000000000000000000000000000000000001'
+              }
+              estimatedCost={(jobDetails.runtimeMinutesEstimate ?? 0) * 0.05}
               onEscrowStatusChange={setEscrowStatus}
             />
 

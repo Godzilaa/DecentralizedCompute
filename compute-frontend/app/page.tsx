@@ -44,7 +44,7 @@ export default function App() {
             <WalletButton />
           </div>
         </nav>
-        <LandingPage onLaunch={() => setCurrentView('dashboard')} />
+        <LandingPage />
       </main>
     );
   }
@@ -137,13 +137,10 @@ export default function App() {
 
         {/* View Router */}
         {currentView === 'dashboard' && (
-          <DashboardPage 
-            setView={setCurrentView} 
-            setSelectedJobId={setSelectedJobId}
-          />
+          <DashboardPage />
         )}
         {currentView === 'monitor' && (
-          <MonitorPage selectedJobId={selectedJobId} />
+          <MonitorPage />
         )}
         {currentView === 'nodes' && (
           <NodesPage />

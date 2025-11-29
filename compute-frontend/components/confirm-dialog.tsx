@@ -11,7 +11,7 @@ interface ConfirmDialogProps {
   title: string;
   message: string;
   confirmText?: string;
-  confirmVariant?: 'default' | 'destructive';
+  confirmVariant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'destructive';
   isLoading?: boolean;
 }
 
@@ -25,7 +25,7 @@ export default function ConfirmDialog({
   title,
   message,
   confirmText = 'Confirm',
-  confirmVariant = 'default',
+  confirmVariant = 'primary',
   isLoading = false
 }: ConfirmDialogProps) {
   if (!isOpen) return null;

@@ -3,11 +3,13 @@
 import { Terminal, ShieldCheck, Zap, ChevronRight, ArrowUpRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MeshBackground } from '@/components/mesh-background';
+import { useRouter } from 'next/navigation';
 
 /**
  * PAGE: Landing / Overview
  */
-export default function LandingPage({ onLaunch }: { onLaunch: () => void }) {
+export default function LandingPage() {
+    const router = useRouter();
     return (
         <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden">
             <MeshBackground />
@@ -29,7 +31,7 @@ export default function LandingPage({ onLaunch }: { onLaunch: () => void }) {
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-                    <Button size="lg" onClick={onLaunch} className="gap-2">
+                    <Button size="lg" onClick={() => router.push('/dashboard')} className="gap-2">
                         Launch Dashboard <ArrowUpRight className="w-4 h-4" />
                     </Button>
                     <Button variant="outline" size="lg" className="gap-2">

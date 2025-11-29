@@ -1,6 +1,7 @@
-'use client';
+"use client";
 
 import { useMemo, useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Box, Cpu, Clock, Activity, ShieldCheck } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
 import { Badge } from '@/components/ui/badge';
@@ -8,13 +9,17 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { VirtualTerminal } from '@/components/virtual-terminal';
 import { useJobs, useLogs, api, type LogEntry } from '@/lib/api';
+import EscrowManager from '@/components/escrow-manager';
+import { useWallet } from '@aptos-labs/wallet-adapter-react';
 
 /**
  * PAGE: Monitor
  */
-export default function MonitorPage({ selectedJobId }: { selectedJobId?: string }) {
+export default function MonitorPage() {
+    const searchParams = useSearchParams();
+    const paramJobId = searchParams.get('selectedJobId') || undefined;
     const { jobs, loading: jobsLoading } = useJobs();
-    const [currentJobId, setCurrentJobId] = useState<string>(selectedJobId || '');
+    const [currentJobId, setCurrentJobId] = useState<string>(paramJobId || '');
     const { logs, loading: logsLoading } = useLogs(currentJobId, 500);
     const [liveMetrics, setLiveMetrics] = useState<any[]>([]);
 
@@ -22,10 +27,15 @@ export default function MonitorPage({ selectedJobId }: { selectedJobId?: string 
     const currentJob = jobs.find(job => job.jobId === currentJobId) || jobs[0];
 
     useEffect(() => {
+        // If a jobId was passed via search params, prefer it; otherwise pick the first job
+        if (paramJobId) {
+            setCurrentJobId(paramJobId);
+            return;
+        }
         if (!currentJobId && jobs.length > 0) {
             setCurrentJobId(jobs[0].jobId);
         }
-    }, [jobs, currentJobId]);
+    }, [jobs, currentJobId, paramJobId]);
 
     // Mock Realtime Data for Chart (replace with real metrics API later)
     const data = useMemo(() =>
@@ -135,6 +145,21 @@ export default function MonitorPage({ selectedJobId }: { selectedJobId?: string 
                             </div>
                         ))}
                     </div>
+
+                    {/* Escrow Management for Finished/Failed Jobs */}
+                    {(currentJob?.status === 'finished' || currentJob?.status === 'failed') && (
+                        <div className="p-4 border-b border-zinc-800">
+                            <EscrowManager
+                                jobId={currentJob.jobId}
+                                providerAddress={currentJob.assigned || ''}
+                                estimatedCost={0.5}
+                                jobStatus={currentJob.status}
+                                onEscrowStatusChange={(status) => {
+                                    console.log('Escrow status changed:', status);
+                                }}
+                            />
+                        </div>
+                    )}
 
                     <div className="p-4 mt-auto">
                         <Card className="bg-gradient-to-br from-zinc-900 to-zinc-900 border-zinc-700/50">

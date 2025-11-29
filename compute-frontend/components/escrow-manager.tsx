@@ -23,6 +23,7 @@ interface EscrowManagerProps {
   providerAddress: string;
   estimatedCost: number; // in APT
   onEscrowStatusChange?: (status: 'none' | 'deposited' | 'released' | 'refunded') => void;
+  jobStatus?: string;
 }
 
 export default function EscrowManager({ 
@@ -30,6 +31,7 @@ export default function EscrowManager({
   providerAddress, 
   estimatedCost, 
   onEscrowStatusChange 
+  , jobStatus
 }: EscrowManagerProps) {
   const { account, signAndSubmitTransaction, connected } = useWallet();
   const [loading, setLoading] = useState(false);
@@ -40,42 +42,38 @@ export default function EscrowManager({
   const [gasEstimate, setGasEstimate] = useState<number>(0);
 
   useEffect(() => {
-    if (connected && account) {
-      checkEscrowStatus();
-      estimateGasForDeposit();
-    }
-  }, [connected, account, jobId]);
+    if (!(connected && account)) return;
+
+    const checkEscrowStatus = async () => {
+      try {
+        const escrowInfo = await escrowService.getEscrowInfo(account.address.toString(), jobId);
+        if (escrowInfo) setEscrowStatus('deposited');
+      } catch (error) {
+        console.log('No escrow found - this is normal for new jobs');
+      }
+    };
+
+    const estimateGasForDeposit = async () => {
+      try {
+        const gas = await escrowService.estimateGas(
+          'deposit',
+          { jobId, providerAddress, amountApt: escrowAmount }
+        );
+        setGasEstimate(gas);
+      } catch (error) {
+        console.error('Error estimating gas:', error);
+      }
+    };
+
+    checkEscrowStatus();
+    estimateGasForDeposit();
+  }, [connected, account, jobId, providerAddress, escrowAmount]);
 
   useEffect(() => {
     onEscrowStatusChange?.(escrowStatus);
   }, [escrowStatus, onEscrowStatusChange]);
 
-  const checkEscrowStatus = async () => {
-    if (!account) return;
-    
-    try {
-      const escrowInfo = await escrowService.getEscrowInfo(account.address.toString(), jobId);
-      if (escrowInfo) {
-        setEscrowStatus('deposited');
-      }
-    } catch (error) {
-      console.log('No escrow found - this is normal for new jobs');
-    }
-  };
-
-  const estimateGasForDeposit = async () => {
-    if (!account) return;
-    
-    try {
-      const gas = await escrowService.estimateGas(
-        'deposit',
-        { jobId, providerAddress, amountApt: escrowAmount }
-      );
-      setGasEstimate(gas);
-    } catch (error) {
-      console.error('Error estimating gas:', error);
-    }
-  };
+  // moved checkEscrowStatus and estimateGasForDeposit into the effect above to satisfy hook deps
 
   const handleDepositEscrow = async () => {
     if (!connected || !account) {
@@ -83,17 +81,39 @@ export default function EscrowManager({
       return;
     }
 
+    // Validate provider address
+    if (!providerAddress || typeof providerAddress !== 'string' || providerAddress.trim() === '') {
+      setError('Invalid provider address. Please ensure your wallet is connected.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     
+    // Check for existing escrow first (if service can provide that info)
+    try {
+      const existing = await escrowService.getEscrowInfo(account.address.toString(), jobId);
+      if (existing) {
+        setEscrowStatus('deposited');
+        setError('Escrow already exists for this job');
+        setLoading(false);
+        return;
+      }
+    } catch (err) {
+      // Non-fatal: if we can't check existence, continue and rely on contract error handling
+      console.debug('Could not check existing escrow before deposit:', err);
+    }
+
     try {
       // Log all parameters before calling
       console.log('Escrow deposit parameters:', {
         jobId,
         providerAddress,
+        providerAddressType: typeof providerAddress,
         providerAddressLength: providerAddress.length,
         escrowAmount,
-        accountAddress: account.address
+        accountAddress: account.address,
+        accountAddressType: typeof account.address
       });
       
       const hash = await escrowService.depositToEscrow(
@@ -102,13 +122,20 @@ export default function EscrowManager({
         providerAddress,
         escrowAmount
       );
-      
+
       setTxHash(hash);
       setEscrowStatus('deposited');
       console.log('Escrow deposit successful:', hash);
     } catch (error: any) {
       console.error('Escrow deposit failed:', error);
-      setError(error.message || 'Failed to deposit escrow');
+      const msg = (error && (error.message || (error.toString && error.toString()))) || '';
+      // If the contract aborted because an escrow already exists, surface friendly state
+      if (typeof msg === 'string' && (msg.includes('E_ESCROW_EXISTS') || msg.includes('Move abort 0x1') || /Escrow already exists/i.test(msg))) {
+        setEscrowStatus('deposited');
+        setError('Escrow already exists for this job (E_ESCROW_EXISTS)');
+      } else {
+        setError(error.message || 'Failed to deposit escrow');
+      }
     } finally {
       setLoading(false);
     }
@@ -215,6 +242,9 @@ export default function EscrowManager({
     );
   }
 
+  const isProviderAddressValid = providerAddress && typeof providerAddress === 'string' && providerAddress.trim() !== '';
+  const shouldShowRefundOnly = jobStatus === 'finished' || jobStatus === 'failed';
+
   return (
     <Card className="p-6">
       <div className="space-y-6">
@@ -235,15 +265,34 @@ export default function EscrowManager({
           </div>
         </div>
 
+        {/* Warning if provider address is invalid */}
+        {!isProviderAddressValid && (
+          <div className="bg-yellow-950/20 border border-yellow-500/20 rounded-lg p-4">
+            <div className="flex gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+              <div className="space-y-1">
+                <h5 className="text-sm font-medium text-yellow-400">Wallet Connection Required</h5>
+                <p className="text-xs text-yellow-300">
+                  Please ensure your wallet is connected to proceed with the escrow payment.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Job & Payment Details */}
         <div className="space-y-3">
           <div className="flex justify-between text-sm">
             <span className="text-zinc-400">Job ID:</span>
-            <span className="text-zinc-200 font-mono">{jobId.slice(0, 12)}...</span>
+            <span className="text-zinc-200 font-mono">{jobId?.slice(0, 12) || 'N/A'}...</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-zinc-400">Provider:</span>
-            <span className="text-zinc-200 font-mono">{providerAddress.slice(0, 8)}...{providerAddress.slice(-6)}</span>
+            <span className="text-zinc-200 font-mono">
+              {providerAddress && typeof providerAddress === 'string' 
+                ? `${providerAddress.slice(0, 8)}...${providerAddress.slice(-6)}` 
+                : 'Not connected'}
+            </span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-zinc-400">Amount:</span>
@@ -307,10 +356,10 @@ export default function EscrowManager({
 
         {/* Action Buttons */}
         <div className="flex gap-3">
-          {escrowStatus === 'none' && (
+          {escrowStatus === 'none' && !shouldShowRefundOnly && (
             <Button
               onClick={handleDepositEscrow}
-              disabled={loading || escrowAmount <= 0}
+              disabled={loading || escrowAmount <= 0 || !isProviderAddressValid}
               className="flex-1 gap-2"
             >
               {loading ? (
@@ -327,7 +376,7 @@ export default function EscrowManager({
             </Button>
           )}
 
-          {escrowStatus === 'deposited' && (
+          {escrowStatus === 'deposited' && !shouldShowRefundOnly && (
             <>
               <Button
                 onClick={handleReleaseEscrow}
@@ -346,28 +395,31 @@ export default function EscrowManager({
                   </>
                 )}
               </Button>
-              <Button
-                onClick={handleRefundEscrow}
-                disabled={loading}
-                variant="outline"
-                className="flex-1 gap-2"
-              >
-                {loading ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-zinc-400/20 border-t-zinc-400 rounded-full animate-spin" />
-                    Refunding...
-                  </>
-                ) : (
-                  <>
-                    <ArrowDownLeft className="w-4 h-4" />
-                    Refund
-                  </>
-                )}
-              </Button>
             </>
           )}
 
-          {(escrowStatus === 'released' || escrowStatus === 'refunded') && (
+          {(escrowStatus === 'deposited' || shouldShowRefundOnly) && (
+            <Button
+              onClick={handleRefundEscrow}
+              disabled={loading}
+              variant="outline"
+              className="flex-1 gap-2"
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-zinc-400/20 border-t-zinc-400 rounded-full animate-spin" />
+                  Refunding...
+                </>
+              ) : (
+                <>
+                  <ArrowDownLeft className="w-4 h-4" />
+                  Refund
+                </>
+              )}
+            </Button>
+          )}
+
+          {(escrowStatus === 'released' || escrowStatus === 'refunded') && !shouldShowRefundOnly && (
             <div className="flex-1 text-center text-sm text-zinc-400">
               Transaction completed
             </div>

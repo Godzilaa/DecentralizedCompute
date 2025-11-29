@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from "react";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import Image from 'next/image';
+import { useWallet, WalletReadyState } from "@aptos-labs/wallet-adapter-react";
 import { Button } from "./ui/button";
 
 export const WalletButton: React.FC = () => {
@@ -25,7 +26,7 @@ export const WalletButton: React.FC = () => {
       <div className="flex gap-2">
         {wallets && wallets.length > 0 ? (
           wallets.map((w) => {
-            const isInstalled = w.readyState === "Installed" || w.readyState === "Loadable";
+            const isInstalled = w.readyState === WalletReadyState.Installed || (('Loadable' in WalletReadyState) && w.readyState === (WalletReadyState as any).Loadable);
             return (
               <Button
                 key={w.name}
@@ -39,7 +40,9 @@ export const WalletButton: React.FC = () => {
                 disabled={!isInstalled}
                 className="flex items-center gap-2"
               >
-                {w.icon && <img src={w.icon} alt={`${w.name} icon`} className="w-5 h-5" />}
+                {w.icon && (
+                  <Image src={w.icon} alt={`${w.name} icon`} width={20} height={20} className="rounded" />
+                )}
                 {isInstalled ? `Connect ${w.name}` : `Install ${w.name}`}
               </Button>
             );

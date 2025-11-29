@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Code, 
   Play, 
@@ -259,7 +259,7 @@ if __name__ == "__main__":
     }
   };
 
-  const validateScript = () => {
+  const validateScript = useCallback(() => {
     const newErrors = [];
     
     if (!script.trim()) {
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     
     setErrors(newErrors);
     return newErrors.length === 0;
-  };
+  }, [script, entrypoint]);
 
   const handleSave = async () => {
     if (!validateScript()) return;
@@ -319,7 +319,7 @@ if __name__ == "__main__":
 
   useEffect(() => {
     validateScript();
-  }, [script, entrypoint]);
+  }, [validateScript]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

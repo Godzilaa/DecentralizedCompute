@@ -1,5 +1,10 @@
 'use client';
 
+// Prevent Next.js from attempting to prerender this page which uses client-side
+// navigation hooks like `useSearchParams`. Marking as force-dynamic ensures
+// the page runs on the client and avoids the Suspense-wrap requirement.
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { 
   Server, 
@@ -27,15 +32,24 @@ import ConfirmDialog from '@/components/confirm-dialog';
 /**
  * Enhanced Nodes View with node selection, filtering, and job creation integration
  */
-export default function NodesPage({ 
-  onSelectNodes, 
-  jobCreationMode = false,
-  singleSelection = false 
-}: { 
-  onSelectNodes?: (nodeIds: string[]) => void;
-  jobCreationMode?: boolean;
-  singleSelection?: boolean;
-}) {
+export default function NodesPage() {
+  const [jobCreationMode, setJobCreationMode] = useState<boolean>(false);
+  const [singleSelection, setSingleSelection] = useState<boolean>(false);
+
+  // Read search params on the client to avoid SSR/prerender issues with `useSearchParams`.
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const sp = new URLSearchParams(window.location.search);
+        const jc = sp.get('jobCreationMode');
+        const ss = sp.get('singleSelection');
+        setJobCreationMode(jc === '1' || jc === 'true');
+        setSingleSelection(ss === '1' || ss === 'true');
+      }
+    } catch (e) {
+      console.warn('Failed to read search params for nodes page', e);
+    }
+  }, []);
   const { nodes, loading, error, refetch } = useNodes();
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline'>('all');
@@ -53,10 +67,10 @@ export default function NodesPage({
         console.log('Auto-selecting best node:', bestNode.nodeId);
         const newSelection = [bestNode.nodeId];
         setSelectedNodes(newSelection);
-        onSelectNodes?.(newSelection);
+        // Intentionally not calling external callback because pages must not receive props in Next App Router
       }
     }
-  }, [nodes, jobCreationMode, selectedNodes.length, onSelectNodes]);
+  }, [nodes, jobCreationMode, selectedNodes.length]);
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; nodeId: string; nodeName: string }>({ 
     isOpen: false, 
     nodeId: '', 
@@ -88,7 +102,7 @@ export default function NodesPage({
 
   const handleNodeSelection = (nodeId: string) => {
     console.log('handleNodeSelection called with:', nodeId, 'jobCreationMode:', jobCreationMode, 'singleSelection:', singleSelection);
-    if (jobCreationMode && onSelectNodes) {
+    if (jobCreationMode) {
       let newSelection: string[];
       
       if (singleSelection) {
@@ -103,10 +117,8 @@ export default function NodesPage({
       
       console.log('NodesPage - Previous selection:', selectedNodes);
       console.log('NodesPage - New selection:', newSelection);
-      console.log('NodesPage - Calling onSelectNodes callback');
-      
+      console.log('NodesPage - Updated selection (jobCreationMode):', newSelection);
       setSelectedNodes(newSelection);
-      onSelectNodes(newSelection);
     }
   };
 
@@ -140,9 +152,8 @@ export default function NodesPage({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'online':
-      case 'active':
         return <CheckCircle className="w-4 h-4 text-emerald-500" />;
-      case 'warning':
+      case 'maintenance':
         return <AlertCircle className="w-4 h-4 text-amber-500" />;
       case 'offline':
       default:
@@ -153,9 +164,8 @@ export default function NodesPage({
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'online':
-      case 'active':
         return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20';
-      case 'warning':
+      case 'maintenance':
         return 'bg-amber-500/20 text-amber-400 border-amber-500/20';
       case 'offline':
       default:
@@ -273,11 +283,11 @@ export default function NodesPage({
         <div className="flex gap-4 text-sm">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span className="text-zinc-400">Online: {nodes.filter(n => n.status === 'online' || n.status === 'active').length}</span>
+            <span className="text-zinc-400">Online: {nodes.filter(n => n.status === 'online').length}</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-amber-500" />
-            <span className="text-zinc-400">Warning: {nodes.filter(n => n.status === 'warning').length}</span>
+            <span className="text-zinc-400">Maintenance: {nodes.filter(n => n.status === 'maintenance').length}</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-zinc-500" />
