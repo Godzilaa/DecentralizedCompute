@@ -47,7 +47,15 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { nodes } = useNodes();
+  const { nodes, loading: nodesLoading, error: nodesError } = useNodes();
+
+  // Debug logging
+  useEffect(() => {
+    console.log('Job Creation Wizard - Nodes:', nodes);
+    console.log('Job Creation Wizard - Nodes Loading:', nodesLoading);
+    console.log('Job Creation Wizard - Nodes Error:', nodesError);
+    console.log('Job Creation Wizard - Selected Nodes:', selectedNodes);
+  }, [nodes, nodesLoading, nodesError, selectedNodes]);
 
   const steps = [
     { id: 'details', name: 'Job Details', icon: Settings },
@@ -203,10 +211,18 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
               <p className="text-zinc-400 text-sm mb-4">
                 Choose which nodes will execute your job. You can select multiple nodes for distributed processing.
               </p>
+              <div className="text-xs text-zinc-500 mb-2">
+                Debug: {nodes.length} nodes available, {selectedNodes.length} selected
+                {nodesLoading && " (Loading...)"}
+                {nodesError && ` (Error: ${nodesError})`}
+              </div>
             </div>
             <div className="h-96 overflow-hidden">
               <NodesPage 
-                onSelectNodes={setSelectedNodes}
+                onSelectNodes={(nodeIds) => {
+                  console.log('Node selection callback fired:', nodeIds);
+                  setSelectedNodes(nodeIds);
+                }}
                 jobCreationMode={true}
               />
             </div>

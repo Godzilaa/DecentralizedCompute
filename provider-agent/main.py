@@ -134,6 +134,7 @@ class NodeRegister(BaseModel):
     specs: Dict[str, Any]
     containerSupported: bool = True
     handshakeKey: Optional[str] = None
+    aptosPublicKey: Optional[str] = None
 
 class HeartbeatIn(BaseModel):
     nodeId: str
@@ -191,8 +192,14 @@ def now_ts():
 def register_node(payload: NodeRegister):
     conn = db_connect()
     c = conn.cursor()
+    
+    # Include Aptos public key in node info
+    node_info = payload.specs.copy()
+    if payload.aptosPublicKey:
+        node_info['aptosPublicKey'] = payload.aptosPublicKey
+    
     c.execute("INSERT OR REPLACE INTO nodes (node_id, info, last_seen) VALUES (?, ?, ?)",
-              (payload.nodeId, json.dumps(payload.specs), now_ts()))
+              (payload.nodeId, json.dumps(node_info), now_ts()))
     conn.commit()
     conn.close()
     return {"status": "ok", "nodeId": payload.nodeId}
@@ -928,6 +935,105 @@ def system_health():
         },
         "timestamp": now_ts()
     }
+
+@app.get("/api/frontend/earnings/{aptos_public_key}")
+def get_earnings_by_public_key(aptos_public_key: str):
+    """Get earnings data for a specific Aptos public key"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Get nodes associated with this public key
+    # Note: In real implementation, you'd have a mapping table
+    # For now, we'll mock this by using node specs to store public keys
+    c.execute("SELECT node_id, info FROM nodes")
+    user_nodes = []
+    for row in c.fetchall():
+        info = json.loads(row[1]) if row[1] else {}
+        if info.get('aptosPublicKey') == aptos_public_key:
+            user_nodes.append(row[0])
+    
+    # Calculate earnings from completed jobs
+    if user_nodes:
+        placeholders = ','.join(['?' for _ in user_nodes])
+        c.execute(f"""
+            SELECT COUNT(*) as total_jobs, 
+                   AVG(CASE WHEN finished_at AND started_at THEN finished_at - started_at ELSE NULL END) as avg_duration
+            FROM jobs WHERE assigned_node IN ({placeholders}) AND status = 'finished'
+        """, user_nodes)
+        job_stats = c.fetchone()
+        total_jobs = job_stats[0] if job_stats else 0
+        avg_duration = job_stats[1] if job_stats and job_stats[1] else 0
+    else:
+        total_jobs = 0
+        avg_duration = 0
+    
+    # Mock earnings calculation (in real implementation, fetch from payment records)
+    total_earned = total_jobs * 12.5  # Mock: $12.50 per job
+    today_earned = min(total_earned, 45.20)  # Mock today's earnings
+    weekly_earned = min(total_earned, 284.15)  # Mock weekly earnings
+    monthly_earned = min(total_earned, 967.45)  # Mock monthly earnings
+    
+    conn.close()
+    
+    return {
+        "totalEarned": total_earned,
+        "todayEarned": today_earned,
+        "weeklyEarned": weekly_earned,
+        "monthlyEarned": monthly_earned,
+        "totalJobs": total_jobs,
+        "activeNodes": len(user_nodes),
+        "averageJobDuration": avg_duration / 60 if avg_duration else 0,  # Convert to minutes
+        "estimatedMonthly": total_earned * 1.2  # Mock growth estimate
+    }
+
+@app.get("/api/frontend/payments/{aptos_public_key}")
+def get_payments_by_public_key(aptos_public_key: str, limit: int = 50):
+    """Get payment history for a specific Aptos public key"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Get user's nodes
+    c.execute("SELECT node_id, info FROM nodes")
+    user_nodes = []
+    for row in c.fetchall():
+        info = json.loads(row[1]) if row[1] else {}
+        if info.get('aptosPublicKey') == aptos_public_key:
+            user_nodes.append(row[0])
+    
+    payments = []
+    if user_nodes:
+        # Get completed jobs for user's nodes
+        placeholders = ','.join(['?' for _ in user_nodes])
+        c.execute(f"""
+            SELECT job_id, assigned_node, started_at, finished_at, payload, result 
+            FROM jobs 
+            WHERE assigned_node IN ({placeholders}) AND status = 'finished'
+            ORDER BY finished_at DESC LIMIT ?
+        """, user_nodes + [limit])
+        
+        for row in c.fetchall():
+            job_id, node_id, started_at, finished_at, payload_json, result_json = row
+            payload = json.loads(payload_json) if payload_json else {}
+            duration = (finished_at - started_at) / 60 if finished_at and started_at else 0  # minutes
+            
+            # Mock payment calculation
+            amount = duration * 0.25  # Mock: $0.25 per minute
+            
+            payments.append({
+                "id": f"pay_{job_id[:8]}",
+                "jobId": job_id,
+                "nodeId": node_id,
+                "amount": round(amount, 2),
+                "currency": "PHOTON",
+                "timestamp": finished_at * 1000,  # Convert to milliseconds
+                "status": "completed",
+                "txHash": f"0x{hashlib.sha256(job_id.encode()).hexdigest()[:8]}...{hashlib.sha256(job_id.encode()).hexdigest()[-4:]}",
+                "jobType": payload.get('meta', {}).get('type', 'Training'),
+                "duration": int(duration)
+            })
+    
+    conn.close()
+    return {"payments": payments, "count": len(payments)}
 
 if __name__ == "__main__":
     import uvicorn

@@ -13,10 +13,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { WalletButton } from '@/components/wallet-button';
 import LandingPage from './(views)/overview/page';
 import DashboardPage from './(views)/dashboard/page';
 import MonitorPage from './(views)/monitor/page';
 import NodesPage from './(views)/nodes/page';
+import EarningsPage from './(views)/earnings/page';
 
 /**
  * MAIN LAYOUT SHELL & APP
@@ -39,7 +41,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="sm" onClick={() => setCurrentView('dashboard')}>Dashboard</Button>
-            <Button variant="primary" size="sm">Connect Wallet</Button>
+            <WalletButton />
           </div>
         </nav>
         <LandingPage onLaunch={() => setCurrentView('dashboard')} />
@@ -88,8 +90,12 @@ export default function App() {
           <Button variant="ghost" className="w-full justify-start gap-3 text-zinc-500">
             <Database className="w-4 h-4" /> Datasets
           </Button>
-          <Button variant="ghost" className="w-full justify-start gap-3 text-zinc-500">
-            <Wallet className="w-4 h-4" /> Billing
+          <Button
+            variant={currentView === 'earnings' ? 'secondary' : 'ghost'}
+            className="w-full justify-start gap-3"
+            onClick={() => setCurrentView('earnings')}
+          >
+            <Wallet className="w-4 h-4" /> Earnings
           </Button>
         </div>
 
@@ -125,10 +131,7 @@ export default function App() {
               />
             </div>
             <div className="h-4 w-[1px] bg-zinc-800 mx-2" />
-            <Button variant="outline" size="sm" className="gap-2 font-mono text-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              Mainnet
-            </Button>
+            <WalletButton />
           </div>
         </header>
 
@@ -144,6 +147,9 @@ export default function App() {
         )}
         {currentView === 'nodes' && (
           <NodesPage />
+        )}
+        {currentView === 'earnings' && (
+          <EarningsPage />
         )}
       </div>
     </div>

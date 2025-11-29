@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { Badge } from '@/components/ui/badge';
 
 const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(' ');
 
@@ -233,10 +233,6 @@ export default function DashboardPage() {
                />
              </div>
              <div className="h-4 w-[1px] bg-zinc-800 mx-2" />
-             <Button variant="outline" size="sm" className="gap-2 font-mono text-xs">
-               <span className="w-2 h-2 rounded-full bg-emerald-500" /> 
-               Mainnet
-             </Button>
           </div>
         </header>
 

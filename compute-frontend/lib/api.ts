@@ -167,6 +167,38 @@ class ApiService {
   }> {
     return this.fetch(`/api/frontend/job-metrics/${jobId}`);
   }
+
+  // Earnings API
+  async getEarningsByPublicKey(aptosPublicKey: string): Promise<{
+    totalEarned: number;
+    todayEarned: number;
+    weeklyEarned: number;
+    monthlyEarned: number;
+    totalJobs: number;
+    activeNodes: number;
+    averageJobDuration: number;
+    estimatedMonthly: number;
+  }> {
+    return this.fetch(`/api/frontend/earnings/${aptosPublicKey}`);
+  }
+
+  async getPaymentsByPublicKey(aptosPublicKey: string, limit: number = 50): Promise<{
+    payments: Array<{
+      id: string;
+      jobId: string;
+      nodeId: string;
+      amount: number;
+      currency: string;
+      timestamp: number;
+      status: string;
+      txHash?: string;
+      jobType: string;
+      duration: number;
+    }>;
+    count: number;
+  }> {
+    return this.fetch(`/api/frontend/payments/${aptosPublicKey}?limit=${limit}`);
+  }
 }
 
 export const api = new ApiService();

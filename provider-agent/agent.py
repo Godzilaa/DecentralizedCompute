@@ -32,6 +32,7 @@ from datetime import datetime
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000")
 NODE_ID = str(uuid.uuid4())
 HANDSHAKE_KEY = secrets.token_hex(16)
+APTOS_PUBLIC_KEY = os.environ.get("APTOS_PUBLIC_KEY", "")  # Node owner's Aptos wallet address
 POLL_INTERVAL = 5            # seconds for job polling
 HEARTBEAT_INTERVAL = 10      # seconds
 JOB_WORKDIR = Path("./workspace/jobs")
@@ -90,18 +91,25 @@ def backend_get(path, params=None, timeout=10):
         return None
 
 # ----------------- Node registration & heartbeat -----------------
-def register_node(node_id, specs, secret_key):
+def register_node(node_id, specs, secret_key, aptos_public_key=None):
     payload = {
         "nodeId": node_id,
         "specs": specs,
         "containerSupported": True,
         "handshakeKey": secret_key
     }
+    
+    # Include Aptos public key if provided
+    if aptos_public_key:
+        payload["aptosPublicKey"] = aptos_public_key
+        print(f"Registering node with Aptos wallet: {aptos_public_key[:8]}...{aptos_public_key[-6:] if len(aptos_public_key) > 14 else aptos_public_key}")
+    
     res = backend_post("/api/nodes/register", json_payload=payload)
     if res and res.status_code == 200:
         print("Node Registered ✅")
         return True
     print("Registration Failed ❌")
+    print(f"Response: {res.text if res else 'No response'}")
     return False
 
 def start_heartbeat(node_id):
@@ -373,6 +381,10 @@ if __name__ == "__main__":
     print("\nAptos Compute Node Agent initializing...")
     print("Node ID generated:", NODE_ID)
     print("Handshake Key secured 🔑")
+    if APTOS_PUBLIC_KEY:
+        print(f"Aptos Wallet: {APTOS_PUBLIC_KEY[:8]}...{APTOS_PUBLIC_KEY[-6:] if len(APTOS_PUBLIC_KEY) > 14 else APTOS_PUBLIC_KEY}")
+    else:
+        print("⚠️  No Aptos public key configured - earnings will not be tracked")
     specs = get_system_specs()
     print("System Specs:", specs)
 
@@ -382,7 +394,7 @@ if __name__ == "__main__":
     print("Docker runtime check ✅")
 
     # register
-    if not register_node(NODE_ID, specs, HANDSHAKE_KEY):
+    if not register_node(NODE_ID, specs, HANDSHAKE_KEY, APTOS_PUBLIC_KEY):
         print("Failed to register node; exiting.")
         raise SystemExit(1)
 
