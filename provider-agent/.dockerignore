@@ -1,0 +1,4 @@
+data/
+workspace/
+*.log
+node_modules/

@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  shelbycompute-backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - SC_HOST=0.0.0.0
+      - SC_PORT=8000
+      - SC_DB=./data/shelbycompute.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/debug/jobs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: shelbycompute-network

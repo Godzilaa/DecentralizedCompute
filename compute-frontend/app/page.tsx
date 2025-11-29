@@ -16,12 +16,14 @@ import { cn } from '@/lib/utils';
 import LandingPage from './(views)/overview/page';
 import DashboardPage from './(views)/dashboard/page';
 import MonitorPage from './(views)/monitor/page';
+import NodesPage from './(views)/nodes/page';
 
 /**
  * MAIN LAYOUT SHELL & APP
  */
 export default function App() {
   const [currentView, setCurrentView] = useState('overview'); // overview, dashboard, monitor
+  const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [isSidebarOpen] = useState(true);
 
   if (currentView === 'overview') {
@@ -76,7 +78,11 @@ export default function App() {
           >
             <Activity className="w-4 h-4" /> Monitor
           </Button>
-          <Button variant="ghost" className="w-full justify-start gap-3 text-zinc-500">
+          <Button
+            variant={currentView === 'nodes' ? 'secondary' : 'ghost'}
+            className="w-full justify-start gap-3"
+            onClick={() => setCurrentView('nodes')}
+          >
             <Server className="w-4 h-4" /> Nodes <Badge variant="outline" className="ml-auto text-[10px]">3</Badge>
           </Button>
           <Button variant="ghost" className="w-full justify-start gap-3 text-zinc-500">
@@ -127,10 +133,17 @@ export default function App() {
         </header>
 
         {/* View Router */}
-        {currentView === 'dashboard' ? (
-          <DashboardPage setView={setCurrentView} />
-        ) : (
-          <MonitorPage />
+        {currentView === 'dashboard' && (
+          <DashboardPage 
+            setView={setCurrentView} 
+            setSelectedJobId={setSelectedJobId}
+          />
+        )}
+        {currentView === 'monitor' && (
+          <MonitorPage selectedJobId={selectedJobId} />
+        )}
+        {currentView === 'nodes' && (
+          <NodesPage />
         )}
       </div>
     </div>

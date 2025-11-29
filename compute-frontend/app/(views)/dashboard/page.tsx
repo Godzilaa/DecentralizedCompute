@@ -1,15 +1,65 @@
 'use client';
 
-import { Activity, Clock, Play, Server, MonitorPlay } from 'lucide-react';
+import { useState } from 'react';
+import { Activity, Clock, Play, Server, MonitorPlay, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { MOCK_JOBS, MOCK_NODES } from '@/lib/constants';
+import { useJobs, useNodes, useSystemStats, api, type JobCreateRequest, type JobScriptUpload } from '@/lib/api';
+import JobCreationWizard from '@/components/job-creation-wizard';
+import ScriptEditor from '@/components/script-editor';
 
 /**
  * PAGE: Dashboard
  */
-export default function DashboardPage({ setView }: { setView: (v: string) => void }) {
+export default function DashboardPage({ 
+    setView, 
+    setSelectedJobId 
+}: { 
+    setView: (v: string) => void;
+    setSelectedJobId: (id: string) => void;
+}) {
+    const { jobs, loading: jobsLoading, error: jobsError, refetch: refetchJobs } = useJobs();
+    const { nodes, loading: nodesLoading } = useNodes();
+    const { stats, loading: statsLoading } = useSystemStats();
+    const [showJobWizard, setShowJobWizard] = useState(false);
+    const [showScriptUpload, setShowScriptUpload] = useState(false);
+
+    const handleCreateJob = async (jobData: JobCreateRequest) => {
+        try {
+            const result = await api.createJob(jobData);
+            console.log('Job created:', result);
+            refetchJobs();
+            setShowCreateJob(false);
+        } catch (error) {
+            console.error('Failed to create job:', error);
+        }
+    };
+
+    const handleUploadScript = async (scriptData: JobScriptUpload) => {
+        try {
+            const result = await api.uploadScript(scriptData);
+            console.log('Script uploaded:', result);
+            setShowScriptUpload(false);
+        } catch (error) {
+            console.error('Failed to upload script:', error);
+        }
+    };
+
+    const getStatusBadgeVariant = (status: string) => {
+        switch (status) {
+            case 'running':
+            case 'assigned':
+                return 'success';
+            case 'failed':
+                return 'warning';
+            case 'finished':
+                return 'default';
+            default:
+                return 'outline';
+        }
+    };
+
     return (
         <div className="flex-1 p-6 space-y-6 overflow-y-auto">
             {/* Header */}
@@ -22,8 +72,11 @@ export default function DashboardPage({ setView }: { setView: (v: string) => voi
                     <Button variant="outline" size="sm" className="gap-2">
                         <Clock className="w-4 h-4" /> Last 24h
                     </Button>
-                    <Button size="sm" className="gap-2">
-                        <Play className="w-4 h-4" /> New Job
+                    <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowScriptUpload(true)}>
+                        <Upload className="w-4 h-4" /> Upload Script
+                    </Button>
+                    <Button size="sm" className="gap-2" onClick={() => setShowJobWizard(true)}>
+                        <Plus className="w-4 h-4" /> New Job
                     </Button>
                 </div>
             </div>
@@ -31,10 +84,30 @@ export default function DashboardPage({ setView }: { setView: (v: string) => voi
             {/* Metric Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
-                    { label: "Active Jobs", value: "12", change: "+2", color: "text-white" },
-                    { label: "GPU Utilization", value: "84.2%", change: "+5.1%", color: "text-emerald-400" },
-                    { label: "Network I/O", value: "4.2 GB/s", change: "stable", color: "text-blue-400" },
-                    { label: "Credits Spent", value: "245.2 PHT", change: "12.4/hr", color: "text-zinc-300" },
+                    { 
+                        label: "Active Jobs", 
+                        value: statsLoading ? "..." : stats?.activeJobs.toString() || "0", 
+                        change: statsLoading ? "..." : `${stats?.totalJobs || 0} total`, 
+                        color: "text-white" 
+                    },
+                    { 
+                        label: "GPU Utilization", 
+                        value: statsLoading ? "..." : `${stats?.gpuUtilization.toFixed(1) || "0"}%`, 
+                        change: "+5.1%", 
+                        color: "text-emerald-400" 
+                    },
+                    { 
+                        label: "Network I/O", 
+                        value: statsLoading ? "..." : `${(stats?.networkIO || 0).toFixed(1)} GB/s`, 
+                        change: "stable", 
+                        color: "text-blue-400" 
+                    },
+                    { 
+                        label: "Credits Spent", 
+                        value: statsLoading ? "..." : `${stats?.creditsSpent.toFixed(1) || "0"} PHT`, 
+                        change: statsLoading ? "..." : `${stats?.creditsPerHour.toFixed(1) || "0"}/hr`, 
+                        color: "text-zinc-300" 
+                    },
                 ].map((stat, i) => (
                     <Card key={i}>
                         <div className="flex justify-between items-start">
@@ -68,28 +141,61 @@ export default function DashboardPage({ setView }: { setView: (v: string) => voi
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-800/50">
-                                {MOCK_JOBS.map((job) => (
-                                    <tr key={job.id} className="hover:bg-zinc-800/30 transition-colors">
-                                        <td className="px-4 py-3 font-mono text-zinc-500">{job.id.split('-')[1]}</td>
-                                        <td className="px-4 py-3 font-medium text-zinc-200">
-                                            <div className="flex flex-col">
-                                                <span>{job.name}</span>
-                                                <span className="text-xs text-zinc-500">{job.type}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-zinc-400">{job.gpu}</td>
-                                        <td className="px-4 py-3">
-                                            <Badge variant={job.status === 'running' ? 'success' : job.status === 'failed' ? 'warning' : 'outline'}>
-                                                {job.status.toUpperCase()}
-                                            </Badge>
-                                        </td>
-                                        <td className="px-4 py-3 text-right">
-                                            <Button variant="ghost" size="sm" onClick={() => setView('monitor')}>
-                                                <MonitorPlay className="w-4 h-4" />
-                                            </Button>
+                                {jobsLoading ? (
+                                    <tr>
+                                        <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
+                                            Loading jobs...
                                         </td>
                                     </tr>
-                                ))}
+                                ) : jobsError ? (
+                                    <tr>
+                                        <td colSpan={5} className="px-4 py-8 text-center text-red-400">
+                                            Error: {jobsError}
+                                        </td>
+                                    </tr>
+                                ) : jobs.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
+                                            No jobs found. Create your first job!
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    jobs.map((job) => (
+                                        <tr key={job.jobId} className="hover:bg-zinc-800/30 transition-colors">
+                                            <td className="px-4 py-3 font-mono text-zinc-500">
+                                                {job.jobId.split('-').pop()?.slice(0, 8)}
+                                            </td>
+                                            <td className="px-4 py-3 font-medium text-zinc-200">
+                                                <div className="flex flex-col">
+                                                    <span>{job.payload?.datasetName || job.jobId}</span>
+                                                    <span className="text-xs text-zinc-500">
+                                                        {job.payload?.meta?.type || 'Training'}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-zinc-400">
+                                                {job.assigned ? 'Assigned' : 'Available'}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <Badge variant={getStatusBadgeVariant(job.status)}>
+                                                    {job.status.toUpperCase()}
+                                                </Badge>
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="sm" 
+                                                    onClick={() => {
+                                                        setSelectedJobId(job.jobId);
+                                                        setView('monitor');
+                                                    }}
+                                                >
+                                                    <MonitorPlay className="w-4 h-4" />
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -99,29 +205,57 @@ export default function DashboardPage({ setView }: { setView: (v: string) => voi
                 <div className="space-y-4">
                     <h3 className="text-lg font-medium text-zinc-200">Cluster Health</h3>
                     <div className="space-y-3">
-                        {MOCK_NODES.map((node) => (
-                            <Card key={node.id} className="group hover:border-zinc-600 transition-colors cursor-pointer">
-                                <div className="flex justify-between items-center mb-2">
-                                    <div className="flex items-center gap-2">
-                                        <div className={`w-2 h-2 rounded-full ${node.status === 'online' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                                        <span className="text-sm font-medium text-zinc-300">{node.region}</span>
-                                    </div>
-                                    <span className="text-xs font-mono text-zinc-500">{node.uptime}</span>
-                                </div>
-                                <div className="space-y-1">
-                                    <div className="flex justify-between text-xs text-zinc-400">
-                                        <span>Load</span>
-                                        <span>{node.load}%</span>
-                                    </div>
-                                    <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
-                                        <div
-                                            className="h-full bg-zinc-400 rounded-full"
-                                            style={{ width: `${node.load}%` }}
-                                        />
-                                    </div>
+                        {nodesLoading ? (
+                            <Card>
+                                <div className="text-center py-4 text-zinc-500">
+                                    Loading nodes...
                                 </div>
                             </Card>
-                        ))}
+                        ) : nodes.length === 0 ? (
+                            <Card>
+                                <div className="text-center py-4 text-zinc-500">
+                                    No nodes connected
+                                </div>
+                            </Card>
+                        ) : (
+                            nodes.map((node) => (
+                                <Card key={node.nodeId} className="group hover:border-zinc-600 transition-colors cursor-pointer">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-2 h-2 rounded-full ${node.status === 'online' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                                            <span className="text-sm font-medium text-zinc-300">
+                                                {node.region || node.nodeId.slice(0, 8)}
+                                            </span>
+                                        </div>
+                                        <span className="text-xs font-mono text-zinc-500">
+                                            {node.uptime || new Date(node.lastSeen).toLocaleTimeString()}
+                                        </span>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between text-xs text-zinc-400">
+                                            <span>CPU Load</span>
+                                            <span>{node.specs.cpuUsage.toFixed(1)}%</span>
+                                        </div>
+                                        <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-zinc-400 rounded-full"
+                                                style={{ width: `${node.specs.cpuUsage}%` }}
+                                            />
+                                        </div>
+                                        <div className="flex justify-between text-xs text-zinc-400 mt-2">
+                                            <span>RAM Usage</span>
+                                            <span>{node.specs.ramUsage.toFixed(1)}%</span>
+                                        </div>
+                                        <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-blue-400 rounded-full"
+                                                style={{ width: `${node.specs.ramUsage}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                </Card>
+                            ))
+                        )}
 
                         <Card className="border-dashed border-zinc-800 bg-transparent flex items-center justify-center py-6 cursor-pointer hover:bg-zinc-900/50 hover:border-zinc-700 transition-all">
                             <span className="text-sm text-zinc-500 flex items-center gap-2">
@@ -131,6 +265,29 @@ export default function DashboardPage({ setView }: { setView: (v: string) => voi
                     </div>
                 </div>
             </div>
+
+            {/* Job Creation Wizard */}
+            {showJobWizard && (
+                <JobCreationWizard
+                    onClose={() => setShowJobWizard(false)}
+                    onJobCreated={(jobId) => {
+                        refetchJobs();
+                        setSelectedJobId(jobId);
+                        setView('monitor');
+                    }}
+                />
+            )}
+
+            {/* Upload Script Modal */}
+            {showScriptUpload && (
+                <ScriptEditor
+                    onSave={async (script, requirements, entrypoint) => {
+                        // This would need a job ID input - for now just close
+                        setShowScriptUpload(false);
+                    }}
+                    onClose={() => setShowScriptUpload(false)}
+                />
+            )}
         </div>
     );
 }

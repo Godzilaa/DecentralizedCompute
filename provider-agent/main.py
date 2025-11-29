@@ -18,7 +18,9 @@ Run:
 
 Then point your provider agent to BACKEND_URL (default http://localhost:8000)
 """
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import sqlite3
@@ -33,13 +35,37 @@ import requests
 # --- Configuration ---
 DB_PATH = os.environ.get("SC_DB", "./shelbycompute.db")
 BACKEND_HOST = os.environ.get("SC_HOST", "0.0.0.0")
-BACKEND_PORT = int(os.environ.get("SC_PORT", "8000"))
+BACKEND_PORT = int(os.environ.get("SC_PORT", os.environ.get("PORT", "8000")))
 SHELBY_API_URL = os.environ.get("SHELBY_API_URL")  # optional
 SHELBY_API_KEY = os.environ.get("SHELBY_API_KEY")  # optional
 APTOS_SENDER_ADDRESS = os.environ.get("APTOS_SENDER_ADDRESS")
 APTOS_PRIVATE_KEY = os.environ.get("APTOS_PRIVATE_KEY")
 
 app = FastAPI(title="ShelbyCompute Minimal Backend")
+
+# Handle OPTIONS requests for CORS preflight
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(request: Request, rest_of_path: str) -> JSONResponse:
+    response = JSONResponse(content="OK")
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'POST, GET, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = '*'
+    return response
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "*"  # Allow all for development
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 # --- DB helpers ---
 def init_db():
@@ -86,9 +112,17 @@ def init_db():
             script TEXT,
             requirements TEXT,
             entrypoint TEXT,
-            uploaded_at INTEGER
+            created_at INTEGER
         )
     ''')
+    
+    # Add created_at column if it doesn't exist (for existing databases)
+    try:
+        c.execute('ALTER TABLE job_scripts ADD COLUMN created_at INTEGER')
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
     conn.commit()
     conn.close()
 
@@ -138,8 +172,12 @@ class FinishJobIn(BaseModel):
 class JobScriptUpload(BaseModel):
     jobId: str
     script: str
-    requirements: Optional[str] = ""
-    entrypoint: Optional[str] = "train.py"
+    requirements: Optional[str] = None
+    entrypoint: str = "train.py"
+
+class StreamLogRequest(BaseModel):
+    job_id: str
+    line: str
 
 # --- Helper utilities ---
 def db_connect():
@@ -224,93 +262,6 @@ def ack_job(payload: JobAckIn):
         raise HTTPException(status_code=400, detail="Job not available for assignment")
     return {"status": "ok", "jobId": payload.jobId}
 
-@app.get("/api/jobs/fetch-script")
-def fetch_script_for_job(jobId: str):
-    """
-    Fetch renter's script and requirements for a specific job.
-    First checks for uploaded custom script, falls back to demo script.
-    """
-    conn = db_connect()
-    c = conn.cursor()
-    
-    # Check if there's a custom script for this job
-    c.execute("SELECT script, requirements, entrypoint FROM job_scripts WHERE job_id = ?", (jobId,))
-    row = c.fetchone()
-    conn.close()
-    
-    if row:
-        # Return custom uploaded script
-        return {
-            "script": row[0],
-            "requirements": row[1] or "",
-            "entrypoint": row[2] or "train.py"
-        }
-    
-    # Fallback to demo script
-    demo_script = f'''
-import os
-import time
-import json
-
-print("Starting demo training job...")
-print("Job ID: {jobId}")
-
-# Simulate some training work
-for i in range(5):
-    print(f"Training epoch {{i+1}}/5...")
-    time.sleep(1)  # Reduced for faster testing
-
-# Create output directory and save a demo model
-os.makedirs("output", exist_ok=True)
-model_data = f"demo-model-{jobId}-{{int(time.time())}}"
-
-with open("output/model.bin", "w") as f:
-    f.write(model_data)
-
-print("Training completed! Model saved to output/model.bin")
-print(f"Model data: {{model_data}}")
-'''
-    
-    demo_requirements = '''
-# Demo requirements - no external dependencies needed for demo
-'''
-    
-    return {
-        "script": demo_script.strip(),
-        "requirements": demo_requirements.strip(),
-        "entrypoint": "train.py"
-    }
-
-@app.post("/api/jobs/upload-script")
-def upload_job_script(script_upload: JobScriptUpload):
-    """
-    Upload a custom training script for a specific job.
-    This allows renters to provide their own training code.
-    """
-    conn = db_connect()
-    c = conn.cursor()
-    
-    # Store the script
-    c.execute("""
-        INSERT OR REPLACE INTO job_scripts 
-        (job_id, script, requirements, entrypoint, uploaded_at) 
-        VALUES (?, ?, ?, ?, ?)
-    """, (
-        script_upload.jobId,
-        script_upload.script,
-        script_upload.requirements,
-        script_upload.entrypoint,
-        now_ts()
-    ))
-    conn.commit()
-    conn.close()
-    
-    return {
-        "status": "ok",
-        "jobId": script_upload.jobId,
-        "message": "Script uploaded successfully"
-    }
-
 @app.post("/api/jobs/finish")
 def finish_job(finish: FinishJobIn, background_tasks: BackgroundTasks):
     conn = db_connect()
@@ -343,13 +294,18 @@ def finish_job(finish: FinishJobIn, background_tasks: BackgroundTasks):
     return {"status": "ok", "jobId": finish.jobId, "provenanceId": prov_id}
 
 @app.post("/api/jobs/stream-log")
-def stream_log(job_id: str, line: str):
-    conn = db_connect()
-    c = conn.cursor()
-    c.execute("INSERT INTO logs (job_id, line, ts) VALUES (?, ?, ?)", (job_id, line, now_ts()))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+def stream_log(log_request: StreamLogRequest):
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute("INSERT INTO logs (job_id, line, ts) VALUES (?, ?, ?)", 
+                 (log_request.job_id, log_request.line, now_ts()))
+        conn.commit()
+        conn.close()
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"Error streaming log: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to stream log: {str(e)}")
 
 @app.post("/api/usage-report")
 def usage_report(rep: UsageReport):
@@ -361,6 +317,66 @@ def usage_report(rep: UsageReport):
     conn.commit()
     conn.close()
     return {"status": "ok"}
+
+@app.post("/api/jobs/upload-script")
+def upload_script(script: JobScriptUpload):
+    """Upload a training script for a job"""
+    print(f"Received script upload request for job: {script.jobId}")
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        
+        # Validate input
+        if not script.jobId or not script.script:
+            print(f"Validation failed - jobId: {bool(script.jobId)}, script: {bool(script.script)}")
+            raise HTTPException(status_code=400, detail="jobId and script are required")
+        
+        print(f"Inserting script for job {script.jobId}, script length: {len(script.script)}")
+        c.execute("""
+            INSERT OR REPLACE INTO job_scripts (job_id, script, requirements, entrypoint, created_at) 
+            VALUES (?, ?, ?, ?, ?)
+        """, (script.jobId, script.script, script.requirements or "", script.entrypoint, now_ts()))
+        conn.commit()
+        conn.close()
+        
+        print(f"Script uploaded successfully for job: {script.jobId}")
+        return {"status": "ok", "message": "Script uploaded successfully", "jobId": script.jobId}
+    except Exception as e:
+        print(f"Error uploading script: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to upload script: {str(e)}")
+
+@app.get("/api/jobs/fetch-script")
+def fetch_script(jobId: str):
+    """Fetch training script for a job"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # First check if job exists
+    c.execute("SELECT job_id FROM jobs WHERE job_id = ?", (jobId,))
+    if not c.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Then check for script
+    c.execute("SELECT script, requirements, entrypoint FROM job_scripts WHERE job_id = ?", (jobId,))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        # Return default script if no custom script uploaded
+        return {
+            "script": "",
+            "requirements": "",
+            "entrypoint": "train.py"
+        }
+    
+    return {
+        "script": row[0],
+        "requirements": row[1] or "",
+        "entrypoint": row[2] or "train.py"
+    }
 
 # --- Background processing ---
 def process_post_job_actions(job_id: str, node_id: str, record: Dict[str, Any]):
@@ -426,6 +442,127 @@ def trigger_photon_reward(node_id: str, job_id: str):
     print(f"Triggering Photon reward for node={node_id}, job={job_id}")
     return True
 
+# --- Frontend API endpoints ---
+@app.get("/api/frontend/system-stats")
+def get_system_stats():
+    """Get overall system statistics for frontend dashboard"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Count jobs by status
+    c.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status")
+    status_counts = dict(c.fetchall())
+    
+    # Get total jobs
+    c.execute("SELECT COUNT(*) FROM jobs")
+    total_jobs = c.fetchone()[0]
+    
+    # Get active nodes
+    c.execute("SELECT COUNT(*) FROM nodes WHERE last_seen > ?", (now_ts() - 300,))  # last 5 mins
+    active_nodes = c.fetchone()[0]
+    
+    conn.close()
+    
+    return {
+        "activeJobs": status_counts.get("assigned", 0) + status_counts.get("running", 0),
+        "totalJobs": total_jobs,
+        "gpuUtilization": 84.2,  # Mock for now
+        "networkIO": 4.2,  # Mock for now
+        "creditsSpent": 245.2,  # Mock for now
+        "creditsPerHour": 12.4  # Mock for now
+    }
+
+
+
+@app.get("/api/frontend/node-stats")
+def get_node_stats():
+    """Get aggregated node statistics"""
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM nodes")
+    total_nodes = c.fetchone()[0]
+    
+    c.execute("SELECT COUNT(*) FROM nodes WHERE last_seen > ?", (now_ts() - 300,))
+    online_nodes = c.fetchone()[0]
+    
+    c.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('assigned', 'running')")
+    active_jobs = c.fetchone()[0]
+    
+    conn.close()
+    
+    return {
+        "total": total_nodes,
+        "online": online_nodes,
+        "offline": total_nodes - online_nodes,
+        "totalGpus": online_nodes * 8,  # Mock: assume 8 GPUs per node
+        "activeJobs": active_jobs
+    }
+
+@app.get("/api/frontend/logs")
+def get_logs_for_frontend(jobId: str = None, limit: int = 100):
+    """Get logs for frontend, optionally filtered by job ID"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    if jobId:
+        c.execute("SELECT job_id, line, ts FROM logs WHERE job_id = ? ORDER BY id DESC LIMIT ?", (jobId, limit))
+    else:
+        c.execute("SELECT job_id, line, ts FROM logs ORDER BY id DESC LIMIT ?", (limit,))
+    
+    rows = c.fetchall()
+    conn.close()
+    
+    return [{
+        "jobId": r[0],
+        "line": r[1],
+        "ts": r[2]
+    } for r in rows]
+
+@app.get("/api/frontend/job-metrics/{job_id}")
+def get_job_metrics(job_id: str):
+    """Get metrics for a specific job"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Get job duration
+    c.execute("SELECT started_at, finished_at FROM jobs WHERE job_id = ?", (job_id,))
+    job_times = c.fetchone()
+    
+    # Get usage reports (stored as JSON in logs)
+    c.execute("SELECT line, ts FROM logs WHERE job_id = ? ORDER BY id", (job_id,))
+    log_rows = c.fetchall()
+    
+    conn.close()
+    
+    duration = 0
+    gpu_usage = []
+    cpu_usage = []
+    memory_usage = []
+    timestamps = []
+    
+    if job_times and job_times[0] and job_times[1]:
+        duration = job_times[1] - job_times[0]
+    
+    # Parse usage metrics from logs
+    for line, ts in log_rows:
+        try:
+            data = json.loads(line)
+            if "cpu" in data and "ram" in data:
+                cpu_usage.append(data["cpu"])
+                memory_usage.append(data["ram"])
+                gpu_usage.append(85 + (data["cpu"] / 10))  # Mock GPU based on CPU
+                timestamps.append(ts)
+        except:
+            continue
+    
+    return {
+        "duration": duration,
+        "gpuUsage": gpu_usage,
+        "cpuUsage": cpu_usage,
+        "memoryUsage": memory_usage,
+        "timestamps": timestamps
+    }
+
 # --- Utilities for debugging ---
 @app.get("/api/debug/jobs")
 def list_jobs():
@@ -454,6 +591,343 @@ def dump_logs(limit: int = 200):
     rows = c.fetchall()
     conn.close()
     return [{"jobId": r[0], "line": r[1], "ts": r[2]} for r in rows]
+
+# --- Frontend API Endpoints ---
+
+@app.get("/api/frontend/dashboard")
+def get_dashboard_stats():
+    """Get dashboard statistics for frontend"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Get job counts by status
+    c.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status")
+    job_stats = {row[0]: row[1] for row in c.fetchall()}
+    
+    # Get active nodes count
+    cutoff = now_ts() - 60  # nodes active in last minute
+    c.execute("SELECT COUNT(*) FROM nodes WHERE last_seen > ?", (cutoff,))
+    active_nodes = c.fetchone()[0]
+    
+    # Get recent jobs
+    c.execute("""
+        SELECT job_id, status, payload, created_at, assigned_node, started_at, finished_at 
+        FROM jobs ORDER BY created_at DESC LIMIT 10
+    """)
+    recent_jobs = []
+    for row in c.fetchall():
+        payload = json.loads(row[2]) if row[2] else {}
+        recent_jobs.append({
+            "jobId": row[0],
+            "status": row[1],
+            "datasetName": payload.get("datasetName", "Unknown"),
+            "createdAt": row[3],
+            "assignedNode": row[4],
+            "startedAt": row[5],
+            "finishedAt": row[6]
+        })
+    
+    conn.close()
+    
+    return {
+        "jobStats": {
+            "pending": job_stats.get("pending", 0),
+            "assigned": job_stats.get("assigned", 0),
+            "finished": job_stats.get("finished", 0),
+            "total": sum(job_stats.values())
+        },
+        "activeNodes": active_nodes,
+        "recentJobs": recent_jobs,
+        "timestamp": now_ts()
+    }
+
+@app.get("/api/frontend/jobs")
+def get_jobs_for_frontend(status: Optional[str] = None, limit: int = 50):
+    """Get jobs with frontend-friendly format"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    if status:
+        c.execute("""
+            SELECT job_id, status, payload, created_at, assigned_node, started_at, finished_at, result
+            FROM jobs WHERE status = ? ORDER BY created_at DESC LIMIT ?
+        """, (status, limit))
+    else:
+        c.execute("""
+            SELECT job_id, status, payload, created_at, assigned_node, started_at, finished_at, result
+            FROM jobs ORDER BY created_at DESC LIMIT ?
+        """, (limit,))
+    
+    jobs = []
+    for row in c.fetchall():
+        payload = json.loads(row[2]) if row[2] else {}
+        result = json.loads(row[7]) if row[7] else {}
+        
+        # Calculate duration if job is finished
+        duration = None
+        if row[5] and row[6]:  # started_at and finished_at
+            duration = row[6] - row[5]
+        
+        jobs.append({
+            "jobId": row[0],
+            "status": row[1],
+            "datasetName": payload.get("datasetName", "Unknown"),
+            "datasetUrl": payload.get("datasetUrl"),
+            "meta": payload.get("meta", {}),
+            "createdAt": row[3],
+            "assignedNode": row[4],
+            "startedAt": row[5],
+            "finishedAt": row[6],
+            "duration": duration,
+            "modelHash": result.get("modelHash") if result else None,
+            "metadata": result.get("meta") if result else None
+        })
+    
+    conn.close()
+    return {"jobs": jobs, "count": len(jobs)}
+
+@app.get("/api/frontend/jobs/{job_id}")
+def get_job_details(job_id: str):
+    """Get detailed job information including logs"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Get job info
+    c.execute("""
+        SELECT job_id, status, payload, created_at, assigned_node, started_at, finished_at, result
+        FROM jobs WHERE job_id = ?
+    """, (job_id,))
+    
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    payload = json.loads(row[2]) if row[2] else {}
+    result = json.loads(row[7]) if row[7] else {}
+    
+    # Calculate duration
+    duration = None
+    if row[5] and row[6]:  # started_at and finished_at
+        duration = row[6] - row[5]
+    
+    # Get job logs
+    c.execute("SELECT line, ts FROM logs WHERE job_id = ? ORDER BY id ASC", (job_id,))
+    logs = [{"line": log[0], "timestamp": log[1]} for log in c.fetchall()]
+    
+    # Get provenance records
+    c.execute("SELECT record, created_at FROM provenance WHERE job_id = ?", (job_id,))
+    provenance = []
+    for prov_row in c.fetchall():
+        record = json.loads(prov_row[0]) if prov_row[0] else {}
+        provenance.append({
+            "record": record,
+            "createdAt": prov_row[1]
+        })
+    
+    conn.close()
+    
+    job_details = {
+        "jobId": row[0],
+        "status": row[1],
+        "datasetName": payload.get("datasetName", "Unknown"),
+        "datasetUrl": payload.get("datasetUrl"),
+        "meta": payload.get("meta", {}),
+        "createdAt": row[3],
+        "assignedNode": row[4],
+        "startedAt": row[5],
+        "finishedAt": row[6],
+        "duration": duration,
+        "modelHash": result.get("modelHash") if result else None,
+        "metadata": result.get("meta") if result else None,
+        "logs": logs,
+        "provenance": provenance
+    }
+    
+    return job_details
+
+@app.get("/api/frontend/nodes")
+def get_nodes_for_frontend():
+    """Get compute nodes with frontend-friendly format"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    c.execute("SELECT node_id, info, last_seen FROM nodes ORDER BY last_seen DESC")
+    nodes = []
+    current_time = now_ts()
+    
+    for row in c.fetchall():
+        info = json.loads(row[1]) if row[1] else {}
+        last_seen = row[2]
+        
+        # Determine node status
+        if current_time - last_seen < 30:  # active if seen in last 30 seconds
+            status = "online"
+        elif current_time - last_seen < 300:  # warning if seen in last 5 minutes
+            status = "warning"
+        else:
+            status = "offline"
+        
+        nodes.append({
+            "nodeId": row[0],
+            "status": status,
+            "lastSeen": str(last_seen),
+            "lastSeenAgo": current_time - last_seen,
+            "specs": {
+                "cpuUsage": info.get("cpuUsage", 0),
+                "ramUsage": info.get("ramUsage", 0),
+                "totalRAM_GB": info.get("totalRAM_GB", 0),
+                "os": info.get("os", "Unknown"),
+                "platform": info.get("platform", "Unknown"),
+                "processor": info.get("processor", "Unknown")
+            },
+            "uptime": "99.9%" if status == "online" else "0%",
+            "region": info.get("region", info.get("os", "Unknown"))
+        })
+    
+    conn.close()
+    return {"nodes": nodes, "count": len(nodes)}
+
+@app.get("/api/frontend/logs/{job_id}")
+def get_job_logs_stream(job_id: str, limit: int = 1000):
+    """Get streaming logs for a specific job"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    c.execute("SELECT line, ts FROM logs WHERE job_id = ? ORDER BY id DESC LIMIT ?", (job_id, limit))
+    logs = [{"line": row[0], "timestamp": row[1]} for row in c.fetchall()]
+    logs.reverse()  # Show oldest first
+    
+    conn.close()
+    return {"jobId": job_id, "logs": logs}
+
+@app.delete("/api/frontend/jobs/{job_id}")
+def delete_job(job_id: str):
+    """Delete a job and its associated data"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Delete job and related records
+    c.execute("DELETE FROM logs WHERE job_id = ?", (job_id,))
+    c.execute("DELETE FROM provenance WHERE job_id = ?", (job_id,))
+    c.execute("DELETE FROM job_scripts WHERE job_id = ?", (job_id,))
+    c.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+    
+    deleted = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return {"status": "ok", "message": "Job deleted successfully", "jobId": job_id}
+
+@app.delete("/api/frontend/nodes/{node_id}")
+def delete_node(node_id: str):
+    """Delete a compute node"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Check if node has active jobs
+    c.execute("SELECT COUNT(*) FROM jobs WHERE assigned_node = ? AND status IN ('assigned', 'running')", (node_id,))
+    active_jobs = c.fetchone()[0]
+    
+    if active_jobs > 0:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Cannot delete node with {active_jobs} active job(s)")
+    
+    # Delete the node
+    c.execute("DELETE FROM nodes WHERE node_id = ?", (node_id,))
+    deleted = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Node not found")
+    
+    return {"status": "ok", "message": "Node deleted successfully", "nodeId": node_id}
+
+@app.delete("/api/frontend/nodes/{node_id}")
+def delete_node(node_id: str):
+    """Delete a compute node"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Check if node has active jobs
+    c.execute("SELECT COUNT(*) FROM jobs WHERE assigned_node = ? AND status IN ('assigned', 'running')", (node_id,))
+    active_jobs = c.fetchone()[0]
+    
+    if active_jobs > 0:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Cannot delete node with {active_jobs} active job(s)")
+    
+    # Delete the node
+    c.execute("DELETE FROM nodes WHERE node_id = ?", (node_id,))
+    deleted = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Node not found")
+    
+    return {"status": "ok", "message": "Node deleted successfully", "nodeId": node_id}
+
+@app.post("/api/frontend/jobs/{job_id}/restart")
+def restart_job(job_id: str):
+    """Restart a finished or failed job"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    # Reset job status to pending
+    c.execute("""
+        UPDATE jobs SET status = 'pending', assigned_node = NULL, 
+        started_at = NULL, finished_at = NULL, result = NULL 
+        WHERE job_id = ?
+    """, (job_id,))
+    
+    updated = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    
+    if not updated:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return {"status": "ok", "message": "Job restarted successfully", "jobId": job_id}
+
+@app.get("/api/frontend/system/health")
+def system_health():
+    """Get system health status"""
+    conn = db_connect()
+    c = conn.cursor()
+    
+    try:
+        # Test database connection
+        c.execute("SELECT 1")
+        db_status = "healthy"
+    except Exception:
+        db_status = "unhealthy"
+    
+    # Count active nodes
+    cutoff = now_ts() - 60
+    c.execute("SELECT COUNT(*) FROM nodes WHERE last_seen > ?", (cutoff,))
+    active_nodes = c.fetchone()[0]
+    
+    # Count jobs by status
+    c.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status")
+    job_counts = {row[0]: row[1] for row in c.fetchall()}
+    
+    conn.close()
+    
+    return {
+        "status": "healthy" if db_status == "healthy" else "unhealthy",
+        "database": db_status,
+        "activeNodes": active_nodes,
+        "jobQueue": {
+            "pending": job_counts.get("pending", 0),
+            "running": job_counts.get("assigned", 0),
+            "completed": job_counts.get("finished", 0)
+        },
+        "timestamp": now_ts()
+    }
 
 if __name__ == "__main__":
     import uvicorn

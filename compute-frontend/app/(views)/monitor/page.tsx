@@ -1,18 +1,33 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Box, Cpu, Clock, Activity, ShieldCheck } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { VirtualTerminal } from '@/components/virtual-terminal';
+import { useJobs, useLogs, api, type LogEntry } from '@/lib/api';
 
 /**
  * PAGE: Monitor
  */
-export default function MonitorPage() {
-    // Mock Realtime Data for Chart
+export default function MonitorPage({ selectedJobId }: { selectedJobId?: string }) {
+    const { jobs, loading: jobsLoading } = useJobs();
+    const [currentJobId, setCurrentJobId] = useState<string>(selectedJobId || '');
+    const { logs, loading: logsLoading } = useLogs(currentJobId, 500);
+    const [liveMetrics, setLiveMetrics] = useState<any[]>([]);
+
+    // Find current job
+    const currentJob = jobs.find(job => job.jobId === currentJobId) || jobs[0];
+
+    useEffect(() => {
+        if (!currentJobId && jobs.length > 0) {
+            setCurrentJobId(jobs[0].jobId);
+        }
+    }, [jobs, currentJobId]);
+
+    // Mock Realtime Data for Chart (replace with real metrics API later)
     const data = useMemo(() =>
         Array.from({ length: 20 }, (_, i) => ({
             name: i,
@@ -28,22 +43,56 @@ export default function MonitorPage() {
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
                         <Box className="w-5 h-5 text-blue-500" />
-                        <h2 className="font-medium text-zinc-200">Llama-3-70b-FineTune</h2>
+                        <h2 className="font-medium text-zinc-200">
+                            {currentJob?.payload?.datasetName || 'No Job Selected'}
+                        </h2>
+                        {jobs.length > 1 && (
+                            <select 
+                                value={currentJobId}
+                                onChange={(e) => setCurrentJobId(e.target.value)}
+                                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200"
+                            >
+                                {jobs.map(job => (
+                                    <option key={job.jobId} value={job.jobId}>
+                                        {job.payload?.datasetName || job.jobId}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
                     </div>
-                    <Badge variant="outline" className="font-mono">ID: 9284-A</Badge>
-                    <Badge variant="success" className="animate-pulse">TRAINING</Badge>
+                    <Badge variant="outline" className="font-mono">
+                        ID: {currentJob?.jobId.split('-').pop()?.slice(0, 8) || 'N/A'}
+                    </Badge>
+                    <Badge 
+                        variant={currentJob?.status === 'running' ? 'success' : 
+                               currentJob?.status === 'assigned' ? 'success' :
+                               currentJob?.status === 'finished' ? 'default' : 'outline'} 
+                        className={currentJob?.status === 'running' ? 'animate-pulse' : ''}
+                    >
+                        {currentJob?.status?.toUpperCase() || 'UNKNOWN'}
+                    </Badge>
                 </div>
                 <div className="flex items-center gap-4 text-xs font-mono text-zinc-500">
-                    <span className="flex items-center gap-1"><Cpu className="w-3 h-3" /> 8x H100</span>
+                    <span className="flex items-center gap-1"><Cpu className="w-3 h-3" /> Agent Node</span>
                     <span>|</span>
-                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> 04:12:33</span>
+                    <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> 
+                        {currentJob?.startedAt ? 
+                            new Date(currentJob.startedAt).toLocaleTimeString() : 
+                            'Not Started'
+                        }
+                    </span>
                 </div>
             </div>
 
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
                 {/* Left: Terminal */}
                 <div className="flex-1 p-4 lg:border-r border-zinc-800 min-h-[400px]">
-                    <VirtualTerminal />
+                    <VirtualTerminal 
+                        logs={logs}
+                        isLoading={logsLoading}
+                        jobId={currentJobId}
+                    />
                 </div>
 
                 {/* Right: Metrics */}
