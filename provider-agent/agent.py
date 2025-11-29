@@ -29,7 +29,7 @@ from pathlib import Path
 from datetime import datetime
 
 # ---------- CONFIG ----------
-BACKEND_URL = os.environ.get("SC_BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000")
 NODE_ID = str(uuid.uuid4())
 HANDSHAKE_KEY = secrets.token_hex(16)
 POLL_INTERVAL = 5            # seconds for job polling
@@ -37,14 +37,15 @@ HEARTBEAT_INTERVAL = 10      # seconds
 JOB_WORKDIR = Path("./workspace/jobs")
 JOB_WORKDIR.mkdir(parents=True, exist_ok=True)
 TRAINER_IMAGE_PREFIX = "shelbycompute-trainer"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 # ----------------------------
-
+# ----------------- Utility functions ----------------- 
 def now_ts():
     return int(time.time())
 
 def get_system_specs():
     cpu = psutil.cpu_percent(interval=1)
-    ram = psutil.virtual_memory().percent
+    ram = psutil.virtual_memory().percent   
     total_ram = round(psutil.virtual_memory().total / (1024**3), 2)
     return {
         "cpuUsage": cpu,
