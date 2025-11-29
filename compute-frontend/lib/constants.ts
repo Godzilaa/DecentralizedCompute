@@ -1,4 +1,9 @@
 /**
+ * Configuration Constants
+ */
+export const APTOS_ESCROW_CONTRACT = "0x2a110b4e8c726476ef36d587e2a5ac46d12a77960e13970b28078696d7de938e";
+
+/**
  * MOCK DATA & TYPES
  */
 

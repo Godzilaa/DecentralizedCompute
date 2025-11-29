@@ -12,7 +12,9 @@ import {
   AlertCircle,
   X,
   Upload,
-  FileText
+  FileText,
+  Coins,
+  Shield
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,20 +22,23 @@ import { Card } from '@/components/ui/card';
 import { useNodes, api, type JobCreateRequest } from '@/lib/api';
 import NodesPage from '@/app/(views)/nodes/page';
 import ScriptEditor from './script-editor';
+import EscrowManager from './escrow-manager';
+import { useWallet } from '@aptos-labs/wallet-adapter-react';
 
 interface JobCreationWizardProps {
   onClose: () => void;
   onJobCreated?: (jobId: string) => void;
 }
 
-type WizardStep = 'details' | 'nodes' | 'script' | 'review' | 'creating';
+type WizardStep = 'details' | 'nodes' | 'script' | 'payment' | 'review' | 'creating';
 
 /**
  * Enhanced Job Creation Wizard with Node Selection and Script Editor
  */
 export default function JobCreationWizard({ onClose, onJobCreated }: JobCreationWizardProps) {
+  const { account } = useWallet();
   const [currentStep, setCurrentStep] = useState<WizardStep>('details');
-  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [jobDetails, setJobDetails] = useState<JobCreateRequest>({
     datasetName: '',
     datasetUrl: '',
@@ -46,6 +51,8 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
   const [showScriptEditor, setShowScriptEditor] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [escrowStatus, setEscrowStatus] = useState<'none' | 'deposited' | 'released' | 'refunded'>('none');
+  const [estimatedCost, setEstimatedCost] = useState(5.0); // Default 5 APT
 
   const { nodes, loading: nodesLoading, error: nodesError } = useNodes();
 
@@ -54,33 +61,49 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
     console.log('Job Creation Wizard - Nodes:', nodes);
     console.log('Job Creation Wizard - Nodes Loading:', nodesLoading);
     console.log('Job Creation Wizard - Nodes Error:', nodesError);
-    console.log('Job Creation Wizard - Selected Nodes:', selectedNodes);
-  }, [nodes, nodesLoading, nodesError, selectedNodes]);
+    console.log('Job Creation Wizard - Selected Node:', selectedNode);
+  }, [nodes, nodesLoading, nodesError, selectedNode]);
+
+  // Track selectedNode changes specifically
+  useEffect(() => {
+    console.log('JobCreationWizard - selectedNode state changed to:', selectedNode);
+    console.log('JobCreationWizard - has selected node:', !!selectedNode);
+    console.log('JobCreationWizard - canProceed() returns:', canProceed());
+  }, [selectedNode]);
 
   const steps = [
     { id: 'details', name: 'Job Details', icon: Settings },
     { id: 'nodes', name: 'Select Nodes', icon: Server },
     { id: 'script', name: 'Training Script', icon: Code },
+    { id: 'payment', name: 'Payment & Escrow', icon: Coins },
     { id: 'review', name: 'Review & Create', icon: CheckCircle }
   ];
 
   const canProceed = () => {
     switch (currentStep) {
       case 'details':
-        return jobDetails.datasetName.trim().length > 0;
+        const detailsValid = jobDetails.datasetName.trim().length > 0;
+        console.log('canProceed - details:', detailsValid, 'datasetName:', jobDetails.datasetName);
+        return detailsValid;
       case 'nodes':
-        return selectedNodes.length > 0;
+        const nodesValid = !!selectedNode;
+        console.log('canProceed - nodes:', nodesValid, 'selectedNode:', selectedNode);
+        return nodesValid;
       case 'script':
-        return script.trim().length > 0;
+        const scriptValid = script.trim().length > 0;
+        console.log('canProceed - script:', scriptValid, 'script length:', script.trim().length);
+        return scriptValid;
       case 'review':
+        console.log('canProceed - review: true');
         return true;
       default:
+        console.log('canProceed - default: false, currentStep:', currentStep);
         return false;
     }
   };
 
   const handleNext = () => {
-    const stepOrder: WizardStep[] = ['details', 'nodes', 'script', 'review'];
+    const stepOrder: WizardStep[] = ['details', 'nodes', 'script', 'payment', 'review'];
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex < stepOrder.length - 1) {
       setCurrentStep(stepOrder[currentIndex + 1]);
@@ -88,7 +111,7 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
   };
 
   const handlePrevious = () => {
-    const stepOrder: WizardStep[] = ['details', 'nodes', 'script', 'review'];
+    const stepOrder: WizardStep[] = ['details', 'nodes', 'script', 'payment', 'review'];
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex > 0) {
       setCurrentStep(stepOrder[currentIndex - 1]);
@@ -105,7 +128,7 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
         ...jobDetails,
         meta: {
           ...jobDetails.meta,
-          selectedNodes,
+          selectedNode,
           hasCustomScript: script.length > 0
         }
       });
@@ -207,23 +230,31 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
         return (
           <div className="space-y-4">
             <div>
-              <h3 className="text-lg font-medium text-zinc-200 mb-2">Select Compute Nodes</h3>
+              <h3 className="text-lg font-medium text-zinc-200 mb-2">Select Compute Node</h3>
               <p className="text-zinc-400 text-sm mb-4">
-                Choose which nodes will execute your job. You can select multiple nodes for distributed processing.
+                Choose which node will execute your job. Select one node from the available options.
               </p>
               <div className="text-xs text-zinc-500 mb-2">
-                Debug: {nodes.length} nodes available, {selectedNodes.length} selected
+                Debug: {nodes.length} nodes available, {selectedNode ? '1' : '0'} selected
                 {nodesLoading && " (Loading...)"}
                 {nodesError && ` (Error: ${nodesError})`}
               </div>
             </div>
-            <div className="h-96 overflow-hidden">
+            <div className="max-h-96 overflow-y-auto">
               <NodesPage 
                 onSelectNodes={(nodeIds) => {
-                  console.log('Node selection callback fired:', nodeIds);
-                  setSelectedNodes(nodeIds);
+                  console.log('JobCreationWizard - Callback received:', nodeIds);
+                  console.log('JobCreationWizard - Current selectedNode before update:', selectedNode);
+                  // For single selection, take the first node or null if empty
+                  const newSelectedNode = nodeIds.length > 0 ? nodeIds[0] : null;
+                  setSelectedNode(newSelectedNode);
+                  console.log('JobCreationWizard - setSelectedNode called with:', newSelectedNode);
+                  setTimeout(() => {
+                    console.log('JobCreationWizard - selectedNode should now be:', newSelectedNode);
+                  }, 100);
                 }}
                 jobCreationMode={true}
+                singleSelection={true}
               />
             </div>
           </div>
@@ -318,6 +349,61 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
           </div>
         );
         
+      case 'payment':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-medium text-zinc-200 mb-4">Payment & Escrow</h3>
+              <p className="text-zinc-400 text-sm mb-6">
+                Set up secure escrow payment for your compute job. Funds will be held in escrow until job completion.
+              </p>
+            </div>
+
+            {/* Cost Estimation */}
+            <Card className="p-4">
+              <h4 className="font-medium text-zinc-200 mb-3">Cost Estimation</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-zinc-400">Runtime Estimate:</span>
+                  <span className="text-zinc-200">{jobDetails.runtimeMinutesEstimate} minutes</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-400">Rate per minute:</span>
+                  <span className="text-zinc-200">0.05 APT</span>
+                </div>
+                <div className="border-t border-zinc-700 pt-2 mt-2">
+                  <div className="flex justify-between font-medium">
+                    <span className="text-zinc-300">Estimated Cost:</span>
+                    <span className="text-zinc-200">{(jobDetails.runtimeMinutesEstimate * 0.05).toFixed(2)} APT</span>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            {/* Escrow Manager */}
+            <EscrowManager
+              jobId={jobDetails.datasetName || 'temp-job-id'}
+              providerAddress={account?.address || '0x0000000000000000000000000000000000000000000000000000000000000001'} // Use your own address as provider for testing
+              estimatedCost={jobDetails.runtimeMinutesEstimate * 0.05}
+              onEscrowStatusChange={setEscrowStatus}
+            />
+
+            {/* Payment Info */}
+            <div className="bg-blue-950/20 border border-blue-500/20 rounded-lg p-4">
+              <div className="flex gap-3">
+                <Shield className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+                <div className="space-y-1">
+                  <h5 className="text-sm font-medium text-blue-400">Secure Escrow Payment</h5>
+                  <p className="text-xs text-blue-300">
+                    Your payment is secured by smart contract escrow. Funds are only released when the job completes successfully, 
+                    or you can refund if there are issues.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+        
       case 'review':
         return (
           <div className="space-y-6">
@@ -359,20 +445,22 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
                 </div>
               </Card>
               
-              {/* Selected Nodes */}
+              {/* Selected Node */}
               <Card>
                 <div className="flex items-center gap-3 mb-3">
                   <Server className="w-4 h-4 text-zinc-400" />
-                  <h4 className="font-medium text-zinc-200">Selected Nodes</h4>
-                  <Badge variant="secondary">{selectedNodes.length}</Badge>
+                  <h4 className="font-medium text-zinc-200">Selected Node</h4>
+                  <Badge variant="secondary">{selectedNode ? '1' : '0'}</Badge>
                 </div>
                 <div className="space-y-1">
-                  {selectedNodes.map(nodeId => (
-                    <div key={nodeId} className="flex items-center gap-2 text-sm">
+                  {selectedNode ? (
+                    <div className="flex items-center gap-2 text-sm">
                       <CheckCircle className="w-3 h-3 text-emerald-500" />
-                      <span className="font-mono text-zinc-300">{nodeId.slice(0, 12)}...</span>
+                      <span className="font-mono text-zinc-300">{selectedNode.slice(0, 12)}...</span>
                     </div>
-                  ))}
+                  ) : (
+                    <div className="text-sm text-zinc-500">No node selected</div>
+                  )}
                 </div>
               </Card>
               
@@ -475,12 +563,12 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
           </div>
 
           {/* Content */}
-          <div className="p-6 min-h-[400px]">
+          <div className="p-6">
             {renderStepContent()}
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between p-6 border-t border-zinc-800">
+          <div className="flex items-center justify-between p-6 border-t border-zinc-800 bg-zinc-900 sticky bottom-0">
             <Button
               variant="ghost"
               onClick={handlePrevious}
@@ -493,8 +581,8 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
               {currentStep === 'review' ? (
                 <Button 
                   onClick={handleCreateJob}
-                  disabled={!canProceed() || creating}
-                  className="gap-2"
+                  disabled={creating}
+                  className="gap-2 bg-emerald-600 hover:bg-emerald-700"
                 >
                   {creating ? (
                     <>
@@ -511,8 +599,7 @@ export default function JobCreationWizard({ onClose, onJobCreated }: JobCreation
               ) : (
                 <Button 
                   onClick={handleNext}
-                  disabled={!canProceed()}
-                  className="gap-2"
+                  className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
                 >
                   Next
                   <ArrowRight className="w-4 h-4" />

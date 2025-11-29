@@ -1,58 +1,29 @@
 'use client';
 
-import { AptosWalletAdapterProvider, useWallet } from "@aptos-labs/wallet-adapter-react";
-import { PropsWithChildren, createContext, useContext, useEffect, useState } from "react";
+import React from "react";
+import { AptosWalletAdapterProvider } from "@aptos-labs/wallet-adapter-react";
 import { Network } from "@aptos-labs/ts-sdk";
 
-type WalletActions = {
-  logout: () => Promise<void>;
-};
+interface WalletProviderProps {
+  children: React.ReactNode;
+}
 
-const WalletActionsContext = createContext<WalletActions | undefined>(undefined);
-
-export const useWalletActions = () => {
-  const ctx = useContext(WalletActionsContext);
-  if (!ctx) throw new Error('useWalletActions must be used within WalletProvider');
-  return ctx;
-};
-
-const WalletActionsBridge = ({ children }: PropsWithChildren) => {
-  const { disconnect } = useWallet();
-
-  const logout = async () => {
-    try {
-      await disconnect();
-    } catch (err) {
-      console.error('Failed to disconnect wallet:', err);
-    }
-  };
-
-  return (
-    <WalletActionsContext.Provider value={{ logout }}>
-      {children}
-    </WalletActionsContext.Provider>
-  );
-};
-
-export const WalletProvider = ({ children }: PropsWithChildren) => {
+export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   return (
     <AptosWalletAdapterProvider
-      autoConnect={false}
+      autoConnect={true}
       dappConfig={{
         network: Network.TESTNET,
-        aptosApiKeys: {
-          testnet: process.env.NEXT_PUBLIC_APTOS_API_KEY_TESTNET,
-        }
+        // Get your API key from: https://developers.aptoslabs.com/docs/api-access
       }}
       onError={(error) => {
-        console.error("Wallet adapter error:", error);
+        console.error("Wallet Adapter Error:", error);
       }}
+      // Optional: uncomment to only allow specific wallets (e.g., Petra)
+      optInWallets={["Petra"]}
+      disableTelemetry={false}
     >
-      <WalletActionsBridge>
-        {children}
-      </WalletActionsBridge>
+      {children}
     </AptosWalletAdapterProvider>
   );
 };
-
-export default WalletActionsContext;

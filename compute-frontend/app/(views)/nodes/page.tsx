@@ -29,16 +29,34 @@ import ConfirmDialog from '@/components/confirm-dialog';
  */
 export default function NodesPage({ 
   onSelectNodes, 
-  jobCreationMode = false 
+  jobCreationMode = false,
+  singleSelection = false 
 }: { 
   onSelectNodes?: (nodeIds: string[]) => void;
   jobCreationMode?: boolean;
+  singleSelection?: boolean;
 }) {
   const { nodes, loading, error, refetch } = useNodes();
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'status' | 'cpu' | 'ram'>('status');
+
+  // Auto-select the best node when in job creation mode
+  useEffect(() => {
+    if (jobCreationMode && nodes.length > 0 && selectedNodes.length === 0) {
+      // Find the best node (first online node, or first node if none online)
+      const onlineNodes = nodes.filter(node => node.status === 'online');
+      const bestNode = onlineNodes.length > 0 ? onlineNodes[0] : nodes[0];
+      
+      if (bestNode) {
+        console.log('Auto-selecting best node:', bestNode.nodeId);
+        const newSelection = [bestNode.nodeId];
+        setSelectedNodes(newSelection);
+        onSelectNodes?.(newSelection);
+      }
+    }
+  }, [nodes, jobCreationMode, selectedNodes.length, onSelectNodes]);
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; nodeId: string; nodeName: string }>({ 
     isOpen: false, 
     nodeId: '', 
@@ -69,15 +87,26 @@ export default function NodesPage({
     });
 
   const handleNodeSelection = (nodeId: string) => {
-    if (jobCreationMode) {
-      setSelectedNodes(prev => {
-        const newSelection = prev.includes(nodeId) 
-          ? prev.filter(id => id !== nodeId)
-          : [...prev, nodeId];
-        
-        onSelectNodes?.(newSelection);
-        return newSelection;
-      });
+    console.log('handleNodeSelection called with:', nodeId, 'jobCreationMode:', jobCreationMode, 'singleSelection:', singleSelection);
+    if (jobCreationMode && onSelectNodes) {
+      let newSelection: string[];
+      
+      if (singleSelection) {
+        // For single selection, either select this node or deselect if already selected
+        newSelection = selectedNodes.includes(nodeId) ? [] : [nodeId];
+      } else {
+        // For multiple selection, toggle the node in the array
+        newSelection = selectedNodes.includes(nodeId) 
+          ? selectedNodes.filter(id => id !== nodeId)
+          : [...selectedNodes, nodeId];
+      }
+      
+      console.log('NodesPage - Previous selection:', selectedNodes);
+      console.log('NodesPage - New selection:', newSelection);
+      console.log('NodesPage - Calling onSelectNodes callback');
+      
+      setSelectedNodes(newSelection);
+      onSelectNodes(newSelection);
     }
   };
 
@@ -89,9 +118,20 @@ export default function NodesPage({
       await api.deleteNode(deleteConfirm.nodeId);
       await refetch(); // Refresh the nodes list
       setDeleteConfirm({ isOpen: false, nodeId: '', nodeName: '' });
+      console.log(`Node ${deleteConfirm.nodeId} deleted successfully`);
     } catch (error) {
       console.error('Failed to delete node:', error);
-      // You might want to show an error toast here
+      
+      // Extract error message from API response
+      let errorMessage = 'Failed to delete node';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      // Show error in console and potentially a toast
+      alert(`Error: ${errorMessage}`);
+      
+      // Keep the dialog open so user can see the error and try again
     } finally {
       setDeleting(false);
     }
@@ -179,7 +219,10 @@ export default function NodesPage({
             <div className="mt-2">
               <Badge variant="secondary" className="gap-2">
                 <CheckCircle className="w-3 h-3" />
-                {selectedNodes.length} node{selectedNodes.length > 1 ? 's' : ''} selected
+                {singleSelection 
+                  ? '1 node selected' 
+                  : `${selectedNodes.length} node${selectedNodes.length > 1 ? 's' : ''} selected`
+                }
               </Badge>
             </div>
           )}
@@ -248,17 +291,17 @@ export default function NodesPage({
         {filteredNodes.map((node) => (
           <Card 
             key={node.nodeId}
-            className={`group hover:border-zinc-600 transition-all cursor-pointer ${
+            className={`group hover:border-zinc-600 transition-all ${
+              jobCreationMode ? 'cursor-pointer' : ''
+            } ${
               jobCreationMode && selectedNodes.includes(node.nodeId) 
                 ? 'border-emerald-500 bg-emerald-500/5' 
                 : ''
-            } ${
-              jobCreationMode && node.status !== 'online' && node.status !== 'active'
-                ? 'opacity-50 cursor-not-allowed'
-                : ''
             }`}
             onClick={() => {
-              if (node.status === 'online' || node.status === 'active') {
+              console.log('Node card clicked:', node.nodeId, 'Status:', node.status, 'Job creation mode:', jobCreationMode);
+              if (jobCreationMode) {
+                console.log('About to call handleNodeSelection');
                 handleNodeSelection(node.nodeId);
               }
             }}
@@ -351,16 +394,21 @@ export default function NodesPage({
                     <Zap className="w-3 h-3 mr-1" />
                     Config
                   </Button>
-                  {node.status === 'offline' && (
+                  {!jobCreationMode && (
                     <Button 
                       variant="ghost" 
                       size="sm" 
-                      className="text-red-400 hover:text-red-300"
+                      className={`${
+                        node.status === 'offline' 
+                          ? 'text-red-400 hover:text-red-300' 
+                          : 'text-red-300/50 hover:text-red-300/70'
+                      }`}
                       onClick={() => setDeleteConfirm({ 
                         isOpen: true, 
                         nodeId: node.nodeId, 
                         nodeName: `Node ${node.nodeId.slice(0, 8)}` 
                       })}
+                      title={node.status !== 'offline' ? 'Node must be offline to delete safely' : 'Delete node'}
                     >
                       <Trash2 className="w-3 h-3" />
                     </Button>
@@ -403,7 +451,10 @@ export default function NodesPage({
             <CheckCircle className="w-5 h-5 text-emerald-500" />
             <div>
               <p className="text-sm font-medium text-zinc-200">
-                {selectedNodes.length} node{selectedNodes.length > 1 ? 's' : ''} selected
+                {singleSelection 
+                  ? '1 node selected' 
+                  : `${selectedNodes.length} node${selectedNodes.length > 1 ? 's' : ''} selected`
+                }
               </p>
               <p className="text-xs text-zinc-400">
                 Ready for job assignment
@@ -419,8 +470,20 @@ export default function NodesPage({
         onClose={() => setDeleteConfirm({ isOpen: false, nodeId: '', nodeName: '' })}
         onConfirm={handleDeleteNode}
         title="Delete Node"
-        message={`Are you sure you want to delete ${deleteConfirm.nodeName}? This action cannot be undone. The node must be offline with no active jobs.`}
-        confirmText="Delete Node"
+        message={(() => {
+          const node = nodes.find(n => n.nodeId === deleteConfirm.nodeId);
+          const isOffline = node?.status === 'offline';
+          return `Are you sure you want to delete ${deleteConfirm.nodeName}? This action cannot be undone. ${
+            isOffline 
+              ? 'The node is offline and safe to delete.' 
+              : '⚠️ WARNING: The node is currently online. Deleting an active node may cause job failures and data loss.'
+          }`;
+        })()}
+        confirmText={(() => {
+          const node = nodes.find(n => n.nodeId === deleteConfirm.nodeId);
+          const isOffline = node?.status === 'offline';
+          return isOffline ? 'Delete Node' : 'Force Delete Node';
+        })()}
         confirmVariant="destructive"
         isLoading={deleting}
       />

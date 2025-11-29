@@ -40,6 +40,7 @@ SHELBY_API_URL = os.environ.get("SHELBY_API_URL")  # optional
 SHELBY_API_KEY = os.environ.get("SHELBY_API_KEY")  # optional
 APTOS_SENDER_ADDRESS = os.environ.get("APTOS_SENDER_ADDRESS")
 APTOS_PRIVATE_KEY = os.environ.get("APTOS_PRIVATE_KEY")
+APTOS_ESCROW_CONTRACT = os.environ.get("APTOS_ESCROW_CONTRACT", "0xd9a8605f60a8b8e124fca13eaae45ef3a4683351f7807b5b91f253616f819bf6")
 
 app = FastAPI(title="ShelbyCompute Minimal Backend")
 

@@ -1,0 +1,11 @@
+[package]
+name = "apex_payments"
+version = "1.0.0"
+
+[addresses]
+apex_payments = "0x2a110b4e8c726476ef36d587e2a5ac46d12a77960e13970b28078696d7de938e"
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-core.git"
+rev = "mainnet"
+subdir = "aptos-move/framework/aptos-framework"
