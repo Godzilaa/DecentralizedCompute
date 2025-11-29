@@ -1,7 +1,10 @@
 "use client";
 
+// Mark this page as dynamic to avoid SSR/prerender issues with client-only
+// navigation hooks like `useSearchParams` (prevents the missing Suspense boundary error).
+export const dynamic = 'force-dynamic';
+
 import { useMemo, useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
 import { Box, Cpu, Clock, Activity, ShieldCheck } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
 import { Badge } from '@/components/ui/badge';
@@ -16,8 +19,19 @@ import { useWallet } from '@aptos-labs/wallet-adapter-react';
  * PAGE: Monitor
  */
 export default function MonitorPage() {
-    const searchParams = useSearchParams();
-    const paramJobId = searchParams.get('selectedJobId') || undefined;
+    const [paramJobId, setParamJobId] = useState<string | undefined>(undefined);
+
+    // Read selectedJobId from the client-side URL to avoid SSR/Suspense issues
+    useEffect(() => {
+        try {
+            if (typeof window !== 'undefined') {
+                const sp = new URLSearchParams(window.location.search);
+                setParamJobId(sp.get('selectedJobId') || undefined);
+            }
+        } catch (e) {
+            console.warn('Failed to read selectedJobId from URL', e);
+        }
+    }, []);
     const { jobs, loading: jobsLoading } = useJobs();
     const [currentJobId, setCurrentJobId] = useState<string>(paramJobId || '');
     const { logs, loading: logsLoading } = useLogs(currentJobId, 500);
