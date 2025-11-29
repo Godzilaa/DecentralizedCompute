@@ -1,5 +1,5 @@
-export { Button } from './Button';
-export { Card } from './Card';
-export { Badge } from './Badge';
+export { Button } from './button';
+export { Card } from './card';
+export { Badge } from './badge';
 export { VirtualTerminal } from './VirtualTerminal';
 export { MeshBackground } from './MeshBackground';

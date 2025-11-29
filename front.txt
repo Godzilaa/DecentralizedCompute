@@ -1,0 +1,663 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { 
+  Terminal, 
+  Activity, 
+  Server, 
+  Cpu, 
+  Zap, 
+  ShieldCheck, 
+  Box, 
+  ChevronRight, 
+  LayoutDashboard, 
+  MonitorPlay, 
+  Settings, 
+  Wallet,
+  Play,
+  Square,
+  Clock,
+  Database,
+  Search,
+  MoreHorizontal,
+  ArrowUpRight
+} from 'lucide-react';
+import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
+
+/**
+ * MOCK DATA & TYPES
+ */
+const MOCK_JOBS = [
+  { id: 'job-x92-alpha', name: 'Llama-3-70b-FineTune', status: 'running', type: 'Training', gpu: '8x H100', duration: '4h 12m', cost: '12.42 PHOTON' },
+  { id: 'job-b21-delta', name: 'Stable-Diffusion-XL-Inference', status: 'completed', type: 'Inference', gpu: '1x A100', duration: '45m', cost: '0.85 PHOTON' },
+  { id: 'job-c55-gamma', name: 'Protein-Folding-Sim-V2', status: 'queued', type: 'Simulation', gpu: '4x A6000', duration: '-', cost: 'Est. 4.20 PHOTON' },
+  { id: 'job-f11-omega', name: 'RAG-Vector-Embeddings', status: 'failed', type: 'Data Proc', gpu: '2x T4', duration: '12m', cost: '0.02 PHOTON' },
+];
+
+const MOCK_NODES = [
+  { id: 'node-us-east-01', region: 'US-VA', status: 'online', uptime: '99.98%', load: 84 },
+  { id: 'node-eu-west-04', region: 'EU-DE', status: 'online', uptime: '99.95%', load: 62 },
+  { id: 'node-asia-ne-02', region: 'JP-TY', status: 'maintenance', uptime: '98.50%', load: 0 },
+];
+
+const LOG_STREAM_SOURCE = [
+  "[INFO] Initializing distributed process group...",
+  "[INFO] Rank 0: CUDA device detected: NVIDIA H100 80GB HBM3",
+  "[INFO] Loading checkpoint shards: 100%|██████████| 32/32 [00:14<00:00, 2.15it/s]",
+  "[INFO] Model config: Hidden size=8192, Layers=80, Heads=64",
+  "[WARN] Gradient checkpointing enabled to save memory",
+  "[SYSTEM] Ep 1 | Step 0 | Loss: 12.452 | LR: 1.5e-5",
+  "[SYSTEM] Ep 1 | Step 10 | Loss: 11.201 | LR: 2.1e-5",
+  "[SYSTEM] Ep 1 | Step 20 | Loss: 9.842 | LR: 3.4e-5",
+  "[SYSTEM] Ep 1 | Step 30 | Loss: 8.115 | LR: 4.8e-5",
+  "[INFO] Verifying PoC (Proof of Compute) hash on-chain...",
+  "[CHAIN] Tx verified: 0x7f...3a2b (Block 192841)",
+  "[SYSTEM] Ep 1 | Step 40 | Loss: 6.231 | LR: 5.2e-5",
+  "[SYSTEM] Ep 1 | Step 50 | Loss: 4.882 | LR: 5.2e-5",
+  "[INFO] Saving intermediate checkpoint to localized storage...",
+];
+
+/**
+ * UI PRIMITIVES (Tailwind + "shadcn-like" feeling)
+ */
+const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(' ');
+
+const Badge = ({ children, variant = 'default', className }: { children: React.ReactNode, variant?: 'default' | 'success' | 'warning' | 'outline', className?: string }) => {
+  const variants = {
+    default: 'bg-zinc-800 text-zinc-300 border-zinc-700',
+    success: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    warning: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    outline: 'bg-transparent border-zinc-700 text-zinc-400'
+  };
+  return (
+    <span className={cn("px-2 py-0.5 text-xs font-medium rounded-sm border", variants[variant], className)}>
+      {children}
+    </span>
+  );
+};
+
+const Button = ({ children, variant = 'primary', size = 'default', className, onClick }: { children: React.ReactNode, variant?: 'primary' | 'secondary' | 'ghost' | 'outline', size?: 'sm' | 'default' | 'lg', className?: string, onClick?: () => void }) => {
+  const base = "inline-flex items-center justify-center font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:opacity-50 disabled:pointer-events-none";
+  const variants = {
+    primary: "bg-zinc-100 text-zinc-900 hover:bg-zinc-200",
+    secondary: "bg-zinc-800 text-zinc-100 hover:bg-zinc-700",
+    ghost: "hover:bg-zinc-800 text-zinc-300 hover:text-white",
+    outline: "border border-zinc-700 bg-transparent hover:bg-zinc-800 text-zinc-100"
+  };
+  const sizes = {
+    sm: "h-8 px-3 text-xs",
+    default: "h-10 py-2 px-4 text-sm",
+    lg: "h-12 px-8 text-base"
+  };
+  return (
+    <button className={cn(base, variants[variant], sizes[size], "rounded-md", className)} onClick={onClick}>
+      {children}
+    </button>
+  );
+};
+
+const Card = ({ children, className, noPadding = false }: { children: React.ReactNode, className?: string, noPadding?: boolean }) => (
+  <div className={cn("bg-zinc-900/50 border border-zinc-800/60 rounded-lg backdrop-blur-sm overflow-hidden", className)}>
+    <div className={cn(noPadding ? "" : "p-5")}>
+      {children}
+    </div>
+  </div>
+);
+
+/**
+ * VISUAL ENGINE: 3D Mesh Background (Canvas Implementation)
+ * Lightweight, performant, enterprise-grade aesthetic.
+ */
+const MeshBackground = () => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let width = canvas.width = window.innerWidth;
+    let height = canvas.height = window.innerHeight;
+
+    const particles: { x: number; y: number; vx: number; vy: number }[] = [];
+    const particleCount = Math.floor((width * height) / 15000); // Density control
+    const connectionDistance = 150;
+
+    for (let i = 0; i < particleCount; i++) {
+      particles.push({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.3, // Slow movement
+        vy: (Math.random() - 0.5) * 0.3
+      });
+    }
+
+    const animate = () => {
+      ctx.clearRect(0, 0, width, height);
+      
+      // Update and Draw Particles
+      ctx.fillStyle = '#52525b'; // Zinc-600
+      
+      particles.forEach((p, i) => {
+        p.x += p.vx;
+        p.y += p.vy;
+
+        // Bounce
+        if (p.x < 0 || p.x > width) p.vx *= -1;
+        if (p.y < 0 || p.y > height) p.vy *= -1;
+
+        // Draw Dot
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw Connections
+        for (let j = i + 1; j < particles.length; j++) {
+          const p2 = particles[j];
+          const dx = p.x - p2.x;
+          const dy = p.y - p2.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < connectionDistance) {
+            const opacity = 1 - (dist / connectionDistance);
+            ctx.strokeStyle = `rgba(63, 63, 70, ${opacity * 0.15})`; // Very subtle line
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
+        }
+      });
+      requestAnimationFrame(animate);
+    };
+
+    const handleResize = () => {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    };
+
+    window.addEventListener('resize', handleResize);
+    animate();
+
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return (
+    <canvas 
+      ref={canvasRef} 
+      className="absolute inset-0 z-0 pointer-events-none"
+      style={{ background: 'radial-gradient(circle at 50% 50%, #18181b 0%, #09090b 100%)' }}
+    />
+  );
+};
+
+/**
+ * COMPONENT: Virtual Terminal (Xterm Simulation)
+ */
+const VirtualTerminal = () => {
+  const [logs, setLogs] = useState<string[]>([
+    "[SYSTEM] Connection established to wss://node-h100-04.shelby.compute",
+    "[SYSTEM] Handshake verified. Session ID: 0x92f...a1",
+  ]);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let lineIndex = 0;
+    const interval = setInterval(() => {
+      if (lineIndex < LOG_STREAM_SOURCE.length) {
+        setLogs(prev => [...prev, LOG_STREAM_SOURCE[lineIndex]]);
+        lineIndex++;
+      } else {
+        // Loop randomly for "live" feel
+        const randomMetric = Math.random();
+        if (randomMetric > 0.7) {
+          setLogs(prev => [...prev, `[METRIC] GPU Util: ${Math.floor(95 + Math.random() * 5)}% | Temp: ${Math.floor(65 + Math.random() * 5)}C`]);
+        }
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  return (
+    <div className="flex flex-col h-full bg-[#0c0c0c] border border-zinc-800 rounded-lg overflow-hidden font-mono text-xs md:text-sm shadow-inner">
+      <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800">
+        <div className="flex items-center gap-2">
+          <div className="w-2.5 h-2.5 rounded-full bg-red-500/20 border border-red-500/50" />
+          <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/20 border border-yellow-500/50" />
+          <div className="w-2.5 h-2.5 rounded-full bg-green-500/20 border border-green-500/50" />
+          <span className="text-zinc-500 ml-2">root@shelby-node-alpha:~</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="success" className="bg-emerald-500/10 text-emerald-500 border-0">LIVE</Badge>
+        </div>
+      </div>
+      <div className="flex-1 p-4 overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+        {logs.map((log, i) => (
+          <div key={i} className="text-zinc-300 whitespace-pre-wrap break-all">
+            <span className="text-zinc-600 mr-2">
+              {new Date().toLocaleTimeString('en-US', { hour12: false })}
+            </span>
+            {log.includes("[INFO]") ? <span className="text-blue-400">{log}</span> :
+             log.includes("[WARN]") ? <span className="text-amber-400">{log}</span> :
+             log.includes("[CHAIN]") ? <span className="text-purple-400">{log}</span> :
+             log}
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+};
+
+/**
+ * PAGE: Landing / Overview
+ */
+const LandingPage = ({ onLaunch }: { onLaunch: () => void }) => (
+  <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden">
+    <MeshBackground />
+    
+    <div className="relative z-10 w-full max-w-5xl px-6 flex flex-col items-start gap-8">
+      <div className="space-y-2">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/50 border border-zinc-800 backdrop-blur-md">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span className="text-xs font-medium text-zinc-400 tracking-wide uppercase">Shelby Compute Network v2.1 Online</span>
+        </div>
+        <h1 className="text-5xl md:text-7xl font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-white via-white to-zinc-500 pb-2">
+          Turn machines into <br />
+          verifiable compute.
+        </h1>
+        <p className="text-xl text-zinc-400 max-w-2xl leading-relaxed">
+          Orchestrate decentralized compute clusters for AI/ML workloads. 
+          Verified on-chain with cryptographic proofs of training.
+        </p>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+        <Button size="lg" onClick={onLaunch} className="gap-2">
+          Launch Dashboard <ArrowUpRight className="w-4 h-4" />
+        </Button>
+        <Button variant="outline" size="lg" className="gap-2">
+          View Architecture <ChevronRight className="w-4 h-4" />
+        </Button>
+      </div>
+
+      {/* Feature Strip */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full mt-12 pt-12 border-t border-zinc-800/50">
+        {[
+          { icon: Terminal, title: "Real-time Logging", desc: "Xterm.js integration for zero-latency stream observation." },
+          { icon: ShieldCheck, title: "On-chain Provenance", desc: "Every epoch hashed and settled on Aptos & Irys." },
+          { icon: Zap, title: "Global Latency", desc: "< 40ms routing via edge-optimized coordination nodes." }
+        ].map((feature, i) => (
+          <div key={i} className="flex gap-4 items-start group">
+            <div className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 group-hover:border-zinc-700 transition-colors">
+              <feature.icon className="w-5 h-5 text-zinc-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-zinc-200">{feature.title}</h3>
+              <p className="text-sm text-zinc-500 mt-1">{feature.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+/**
+ * PAGE: Dashboard
+ */
+const DashboardPage = ({ setView }: { setView: (v: string) => void }) => (
+  <div className="flex-1 p-6 space-y-6 overflow-y-auto">
+    {/* Header */}
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <h2 className="text-2xl font-semibold text-white">Platform Overview</h2>
+        <p className="text-zinc-400">Manage your clusters and active training jobs.</p>
+      </div>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" className="gap-2">
+          <Clock className="w-4 h-4" /> Last 24h
+        </Button>
+        <Button size="sm" className="gap-2">
+          <Play className="w-4 h-4" /> New Job
+        </Button>
+      </div>
+    </div>
+
+    {/* Metric Cards */}
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {[
+        { label: "Active Jobs", value: "12", change: "+2", color: "text-white" },
+        { label: "GPU Utilization", value: "84.2%", change: "+5.1%", color: "text-emerald-400" },
+        { label: "Network I/O", value: "4.2 GB/s", change: "stable", color: "text-blue-400" },
+        { label: "Credits Spent", value: "245.2 PHT", change: "12.4/hr", color: "text-zinc-300" },
+      ].map((stat, i) => (
+        <Card key={i}>
+          <div className="flex justify-between items-start">
+            <span className="text-zinc-500 text-sm font-medium">{stat.label}</span>
+            <Activity className="w-4 h-4 text-zinc-700" />
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className={`text-2xl font-mono font-medium ${stat.color}`}>{stat.value}</span>
+            <span className="text-xs text-zinc-600 font-mono">{stat.change}</span>
+          </div>
+        </Card>
+      ))}
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Main Content: Active Jobs */}
+      <div className="lg:col-span-2 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-medium text-zinc-200">Active Workloads</h3>
+          <Button variant="ghost" size="sm" className="text-xs">View All</Button>
+        </div>
+        <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg overflow-hidden">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-zinc-900 border-b border-zinc-800 text-zinc-400 font-medium">
+              <tr>
+                <th className="px-4 py-3">Job ID</th>
+                <th className="px-4 py-3">Workload Name</th>
+                <th className="px-4 py-3">Hardware</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50">
+              {MOCK_JOBS.map((job) => (
+                <tr key={job.id} className="hover:bg-zinc-800/30 transition-colors">
+                  <td className="px-4 py-3 font-mono text-zinc-500">{job.id.split('-')[1]}</td>
+                  <td className="px-4 py-3 font-medium text-zinc-200">
+                    <div className="flex flex-col">
+                      <span>{job.name}</span>
+                      <span className="text-xs text-zinc-500">{job.type}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-zinc-400">{job.gpu}</td>
+                  <td className="px-4 py-3">
+                    <Badge variant={job.status === 'running' ? 'success' : job.status === 'failed' ? 'warning' : 'outline'}>
+                      {job.status.toUpperCase()}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button variant="ghost" size="sm" onClick={() => setView('monitor')}>
+                      <MonitorPlay className="w-4 h-4" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Sidebar: Nodes */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium text-zinc-200">Cluster Health</h3>
+        <div className="space-y-3">
+          {MOCK_NODES.map((node) => (
+            <Card key={node.id} className="group hover:border-zinc-600 transition-colors cursor-pointer">
+              <div className="flex justify-between items-center mb-2">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${node.status === 'online' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span className="text-sm font-medium text-zinc-300">{node.region}</span>
+                </div>
+                <span className="text-xs font-mono text-zinc-500">{node.uptime}</span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-zinc-400">
+                  <span>Load</span>
+                  <span>{node.load}%</span>
+                </div>
+                <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-zinc-400 rounded-full" 
+                    style={{ width: `${node.load}%` }} 
+                  />
+                </div>
+              </div>
+            </Card>
+          ))}
+          
+          <Card className="border-dashed border-zinc-800 bg-transparent flex items-center justify-center py-6 cursor-pointer hover:bg-zinc-900/50 hover:border-zinc-700 transition-all">
+            <span className="text-sm text-zinc-500 flex items-center gap-2">
+              <Server className="w-4 h-4" /> Add Node Provider
+            </span>
+          </Card>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+/**
+ * PAGE: Monitor
+ */
+const MonitorPage = () => {
+  // Mock Realtime Data for Chart
+  const data = useMemo(() => 
+    Array.from({ length: 20 }, (_, i) => ({
+      name: i,
+      loss: Math.max(0.5, 5 - Math.log(i + 1) - Math.random() * 0.5),
+      gpu: 85 + Math.random() * 10
+    }))
+  , []);
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Monitor Header */}
+      <div className="h-14 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-950/50 backdrop-blur-sm z-10">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Box className="w-5 h-5 text-blue-500" />
+            <h2 className="font-medium text-zinc-200">Llama-3-70b-FineTune</h2>
+          </div>
+          <Badge variant="outline" className="font-mono">ID: 9284-A</Badge>
+          <Badge variant="success" className="animate-pulse">TRAINING</Badge>
+        </div>
+        <div className="flex items-center gap-4 text-xs font-mono text-zinc-500">
+          <span className="flex items-center gap-1"><Cpu className="w-3 h-3" /> 8x H100</span>
+          <span>|</span>
+          <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> 04:12:33</span>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+        {/* Left: Terminal */}
+        <div className="flex-1 p-4 lg:border-r border-zinc-800 min-h-[400px]">
+          <VirtualTerminal />
+        </div>
+
+        {/* Right: Metrics */}
+        <div className="w-full lg:w-[400px] bg-zinc-900/20 flex flex-col overflow-y-auto border-t lg:border-t-0 border-zinc-800">
+          
+          <div className="p-4 border-b border-zinc-800">
+            <h3 className="text-sm font-medium text-zinc-400 mb-4 flex items-center gap-2">
+              <Activity className="w-4 h-4" /> Training Loss
+            </h3>
+            <div className="h-40 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={data}>
+                  <Line type="monotone" dataKey="loss" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <XAxis hide />
+                  <YAxis hide domain={['dataMin', 'dataMax']} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', fontSize: '12px' }}
+                    itemStyle={{ color: '#e4e4e7' }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="p-4 border-b border-zinc-800 space-y-4">
+            <h3 className="text-sm font-medium text-zinc-400">Resource Usage</h3>
+            {[
+              { label: 'GPU Memory (VRAM)', val: '72GB / 80GB', pct: 90 },
+              { label: 'System RAM', val: '128GB / 512GB', pct: 25 },
+              { label: 'CPU Utilization', val: '42 Threads', pct: 60 }
+            ].map((m, i) => (
+              <div key={i} className="space-y-1">
+                <div className="flex justify-between text-xs text-zinc-300">
+                  <span>{m.label}</span>
+                  <span className="font-mono">{m.val}</span>
+                </div>
+                <div className="h-1.5 w-full bg-zinc-800 rounded-sm overflow-hidden">
+                  <div className="h-full bg-zinc-500 rounded-sm" style={{ width: `${m.pct}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="p-4 mt-auto">
+             <Card className="bg-gradient-to-br from-zinc-900 to-zinc-900 border-zinc-700/50">
+               <div className="flex items-center gap-3 mb-2">
+                 <ShieldCheck className="w-5 h-5 text-purple-400" />
+                 <span className="text-sm font-medium text-purple-100">Verifiable Compute</span>
+               </div>
+               <div className="space-y-2">
+                 <div className="flex justify-between text-xs text-zinc-400">
+                   <span>Proof Hash</span>
+                   <span className="text-purple-300 hover:underline cursor-pointer">0x7f...3a2b</span>
+                 </div>
+                 <div className="flex justify-between text-xs text-zinc-400">
+                   <span>Validator</span>
+                   <span>Shelby-Oracle-01</span>
+                 </div>
+                 <Button size="sm" variant="outline" className="w-full mt-2 text-xs border-purple-500/20 text-purple-300 hover:bg-purple-900/20">
+                   Verify on Aptos
+                 </Button>
+               </div>
+             </Card>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * MAIN LAYOUT SHELL & APP
+ */
+export default function App() {
+  const [currentView, setCurrentView] = useState('overview'); // overview, dashboard, monitor
+  const [isSidebarOpen, setSidebarOpen] = useState(true);
+
+  if (currentView === 'overview') {
+    return (
+      <main className="bg-zinc-950 min-h-screen text-zinc-100 font-sans selection:bg-zinc-700 selection:text-white">
+        {/* Simple Nav for Landing */}
+        <nav className="absolute top-0 w-full z-50 px-6 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-zinc-100 rounded-md flex items-center justify-center">
+              <div className="w-4 h-4 bg-zinc-900 rounded-sm transform rotate-45" />
+            </div>
+            <span className="font-bold text-lg tracking-tight">ShelbyCompute</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" onClick={() => setCurrentView('dashboard')}>Dashboard</Button>
+            <Button variant="primary" size="sm">Connect Wallet</Button>
+          </div>
+        </nav>
+        <LandingPage onLaunch={() => setCurrentView('dashboard')} />
+      </main>
+    );
+  }
+
+  // Dashboard / Monitor Layout
+  return (
+    <div className="flex h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-zinc-700 selection:text-white overflow-hidden">
+      
+      {/* Sidebar */}
+      <aside className={cn(
+        "w-64 bg-zinc-950 border-r border-zinc-800 flex flex-col transition-all duration-300 ease-in-out",
+        !isSidebarOpen && "w-0 -ml-4 opacity-0 overflow-hidden"
+      )}>
+        <div className="p-4 flex items-center gap-2 border-b border-zinc-800 h-16">
+          <div className="w-6 h-6 bg-zinc-100 rounded-sm flex items-center justify-center">
+            <div className="w-3 h-3 bg-zinc-900 rounded-[1px] transform rotate-45" />
+          </div>
+          <span className="font-bold tracking-tight">Shelby</span>
+        </div>
+
+        <div className="flex-1 p-3 space-y-1">
+          <Button 
+            variant={currentView === 'dashboard' ? 'secondary' : 'ghost'} 
+            className="w-full justify-start gap-3"
+            onClick={() => setCurrentView('dashboard')}
+          >
+            <LayoutDashboard className="w-4 h-4" /> Dashboard
+          </Button>
+          <Button 
+            variant={currentView === 'monitor' ? 'secondary' : 'ghost'} 
+            className="w-full justify-start gap-3"
+            onClick={() => setCurrentView('monitor')}
+          >
+            <Activity className="w-4 h-4" /> Monitor
+          </Button>
+          <Button variant="ghost" className="w-full justify-start gap-3 text-zinc-500">
+            <Server className="w-4 h-4" /> Nodes <Badge variant="outline" className="ml-auto text-[10px]">3</Badge>
+          </Button>
+          <Button variant="ghost" className="w-full justify-start gap-3 text-zinc-500">
+            <Database className="w-4 h-4" /> Datasets
+          </Button>
+          <Button variant="ghost" className="w-full justify-start gap-3 text-zinc-500">
+            <Wallet className="w-4 h-4" /> Billing
+          </Button>
+        </div>
+
+        <div className="p-4 border-t border-zinc-800">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500" />
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">DevTeam_01</span>
+              <span className="text-xs text-zinc-500">Free Tier</span>
+            </div>
+            <Settings className="w-4 h-4 text-zinc-500 ml-auto cursor-pointer hover:text-white" />
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Topbar */}
+        <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-950">
+          <div className="flex items-center gap-4">
+             {/* Toggle Sidebar placeholder logic if needed */}
+             <span className="text-zinc-500 text-sm breadcrumbs">
+                Platform / <span className="text-zinc-200 capitalize">{currentView}</span>
+             </span>
+          </div>
+          <div className="flex items-center gap-4">
+             <div className="relative hidden sm:block">
+               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+               <input 
+                 type="text" 
+                 placeholder="Search jobs, hashes..." 
+                 className="bg-zinc-900 border border-zinc-800 rounded-md py-1.5 pl-9 pr-4 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-600 w-64"
+               />
+             </div>
+             <div className="h-4 w-[1px] bg-zinc-800 mx-2" />
+             <Button variant="outline" size="sm" className="gap-2 font-mono text-xs">
+               <span className="w-2 h-2 rounded-full bg-emerald-500" /> 
+               Mainnet
+             </Button>
+          </div>
+        </header>
+
+        {/* View Router */}
+        {currentView === 'dashboard' ? (
+          <DashboardPage setView={setCurrentView} />
+        ) : (
+          <MonitorPage />
+        )}
+      </div>
+    </div>
+  );
+}

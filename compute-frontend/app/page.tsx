@@ -13,9 +13,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import LandingPage from './(views)/overview/page';
-import DashboardPage from './(views)/dashboard/page';
-import MonitorPage from './(views)/monitor/page';
+import LandingPage from '@/components/views/overview';
+import DashboardPage from '@/components/views/dashboard';
+import MonitorPage from '@/components/views/monitor';
 
 /**
  * MAIN LAYOUT SHELL & APP
