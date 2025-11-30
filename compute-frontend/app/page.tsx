@@ -37,7 +37,7 @@ export default function App() {
             <div className="w-8 h-8 bg-zinc-100 rounded-md flex items-center justify-center">
               <div className="w-4 h-4 bg-zinc-900 rounded-sm transform rotate-45" />
             </div>
-            <span className="font-bold text-lg tracking-tight">ShelbyCompute</span>
+            <span className="font-bold text-lg tracking-tight">ApexCompute</span>
           </div>
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="sm" onClick={() => setCurrentView('dashboard')}>Dashboard</Button>
@@ -62,7 +62,7 @@ export default function App() {
           <div className="w-6 h-6 bg-zinc-100 rounded-sm flex items-center justify-center">
             <div className="w-3 h-3 bg-zinc-900 rounded-[1px] transform rotate-45" />
           </div>
-          <span className="font-bold tracking-tight">Shelby</span>
+          <span className="font-bold tracking-tight">Apex</span>
         </div>
 
         <div className="flex-1 p-3 space-y-1">
